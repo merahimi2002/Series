@@ -132,7 +132,7 @@
             </div>
             <div class="row g-3 align-items-end my-4">
                 <!-- STATUS -->
-                <div class="col-lg-2 col-md-4 col-6">
+                <div class="col-lg col-md-4 col-6">
                     <label class="form-label small fw-semibold">Status</label>
                     <select id="statusFilter" class="form-select">
                         <option value="">All Status</option>
@@ -143,7 +143,7 @@
                 </div>
 
                 <!-- TYPE -->
-                <div class="col-lg-2 col-md-4 col-6">
+                <div class="col-lg col-md-4 col-6">
                     <label class="form-label small fw-semibold">Type</label>
                     <select id="typeFilter" class="form-select">
                         <option value="">All Type</option>
@@ -154,7 +154,7 @@
                 </div>
 
                 <!-- SITE -->
-                <div class="col-lg-2 col-md-4 col-6">
+                <div class="col-lg col-md-4 col-6">
                     <label class="form-label small fw-semibold">Site</label>
                     <select id="siteFilter" class="form-select">
                         <option value="">All Sites</option>
@@ -163,8 +163,19 @@
                     </select>
                 </div>
 
+                <!-- MISSING -->
+                <div class="col-lg col-md-4 col-6">
+                    <label class="form-label small fw-semibold">Missing</label>
+                    <select id="missingFilter" class="form-select">
+                        <option value="">All</option>
+                        <option value="Complete">Complete</option>
+                        <option value="Has Missing">Has Missing</option>
+                        <option value="N/A">N/A</option>
+                    </select>
+                </div>
+
                 <!-- ROWS -->
-                <div class="col-lg-2 col-md-4 col-6">
+                <div class="col-lg col-md-4 col-6">
                     <label class="form-label small fw-semibold">Rows</label>
                     <select id="rowsPerPageSelect" class="form-select">
                         <option value="5">5 rows</option>
@@ -176,13 +187,13 @@
                 </div>
 
                 <!-- FILE -->
-                <div class="col-lg-2 col-md-6 col-12" id="fileInputContainer" style="display: none;">
+                <div class="col-lg col-md-6 col-12" id="fileInputContainer" style="display: none;">
                     <label class="form-label small fw-semibold">Excel File</label>
                     <input id="excelFileInput" type="file" class="form-control" accept=".xlsx,.xls" />
                 </div>
 
                 <!-- CLEAR -->
-                <div class="col-lg-2 col-md-6 col-12">
+                <div class="col-lg col-md-6 col-12">
                     <button id="clearFiltersBtn" class="btn btn-outline-danger">
                         <i class="bi bi-x-circle me-1"></i>
                         Clear Filters
@@ -279,7 +290,6 @@
     <script src="js/wow.min.js"></script>
     <script src="js/xlsx.full.min.js"></script>
     <script src="js/data.js"></script>
-    <script src="js/main.js"></script>
     <script src="js/source.js"></script>
 
 
