@@ -21,11 +21,109 @@ const CONFIG = {
     sortOrder: "asc",
 
     search: "",
+    site: "",
 
     tableBody: null,
     tableHead: null,
     pagination: null,
 };
+
+const SEARCH_SITES = {
+    digimoviez: {
+        label: "DigiMoviez",
+        url: "https://digimoviez.com/?s=",
+    },
+    f2my: {
+        label: "F2MY",
+        url: "https://www.f2my.top/?s=",
+    },
+};
+
+function getRowValue(row, keys) {
+    const lowerKeys = keys.map(k => k.toLowerCase());
+    for (const key of Object.keys(row)) {
+        if (lowerKeys.includes(key.toLowerCase()) && row[key] != null && String(row[key]).trim() !== "") {
+            return String(row[key]).trim();
+        }
+    }
+    return "";
+}
+
+function getSearchTitle(row) {
+    const exactKeys = ["title", "Title", "Serial Name", "serial name", "Name", "name"];
+    let title = getRowValue(row, exactKeys);
+    if (title) return title;
+
+    // fallback to any likely title/name field
+    return getRowValue(row, [
+        "movie",
+        "film",
+        "serial",
+        "episode",
+        "name",
+        "title",
+    ]);
+}
+
+function getRowStatus(row) {
+    const status = getRowValue(row, ["status", "Status"]);
+    return status.toLowerCase();
+}
+
+function getSearchButtonHTML(siteKey, title) {
+    if (!title) return "";
+    const site = SEARCH_SITES[siteKey];
+    if (!site) return "";
+    const href = `${site.url}${encodeURIComponent(title)}`;
+    return `
+        <a
+            class="btn btn-sm btn-outline-success me-1 mb-1"
+            target="_blank"
+            rel="noopener noreferrer"
+            href="${href}"
+            title="Search ${site.label} for ${title}"
+        >
+            Download
+        </a>
+    `;
+}
+
+function normalizeRowValues(row) {
+    const normalized = {};
+    for (const [key, value] of Object.entries(row)) {
+        let normalizedValue = value;
+        if (typeof normalizedValue === "string") {
+            normalizedValue = normalizedValue.trim();
+        }
+
+        if (key.toLowerCase() === "type" && !normalizedValue) {
+            normalizedValue = "Series";
+        }
+
+        normalized[key] = normalizedValue;
+    }
+    return normalized;
+}
+
+function renderSearchCell(row) {
+    const status = getRowStatus(row);
+    if (status !== "download") {
+        return "";
+    }
+
+    const title = getSearchTitle(row);
+    if (!title) {
+        return "";
+    }
+
+    if (!CONFIG.site) {
+        return Object.keys(SEARCH_SITES)
+            .map(siteKey => getSearchButtonHTML(siteKey, title))
+            .join("");
+    }
+
+    return getSearchButtonHTML(CONFIG.site, title);
+}
 
 // =====================
 // LOAD EXCEL
@@ -46,7 +144,7 @@ async function parseWorkbookBuffer(arrayBuffer) {
         normalizedHeaders.forEach((header, index) => {
             obj[header] = row[index] || "";
         });
-        return obj;
+        return normalizeRowValues(obj);
     });
 }
 
@@ -173,7 +271,7 @@ function normalizeCachedData(data) {
         rawHeaders.forEach((key, index) => {
             normalized[normalizedHeaders[index]] = row[key];
         });
-        return normalized;
+        return normalizeRowValues(normalized);
     });
 }
 
@@ -189,10 +287,14 @@ function syncFromURL() {
     const rpp = parseInt(params.get("rpp"));
     if (!Number.isNaN(rpp) && rpp > 0) CONFIG.rowsPerPage = rpp;
 
+    CONFIG.site = params.get("site") || "";
+
     const statusEl = document.getElementById("statusFilter");
     const typeEl = document.getElementById("typeFilter");
+    const siteEl = document.getElementById("siteFilter");
     if (statusEl) statusEl.value = params.get("status") || "";
     if (typeEl) typeEl.value = params.get("type") || "";
+    if (siteEl) siteEl.value = CONFIG.site;
 }
 
 function updateURL() {
@@ -202,10 +304,12 @@ function updateURL() {
 
     const status = document.getElementById("statusFilter")?.value;
     const type = document.getElementById("typeFilter")?.value;
+    const site = document.getElementById("siteFilter")?.value;
     const rpp = CONFIG.rowsPerPage;
 
     if (status) params.set("status", status);
     if (type) params.set("type", type);
+    if (site) params.set("site", site);
     if (rpp) params.set("rpp", String(rpp));
 
     window.history.replaceState({}, "", `?${params.toString()}`);
@@ -274,7 +378,18 @@ function renderTableHead() {
 
     headRow.innerHTML = "";
 
-    CONFIG.columns.forEach(col => {
+    const statusFilter = document.getElementById("statusFilter")?.value || "";
+    const columnsToRender = [...CONFIG.columns];
+    if (statusFilter === "Download") {
+        const typeIndex = columnsToRender.indexOf("Type");
+        if (typeIndex >= 0 && !columnsToRender.includes("Download")) {
+            columnsToRender.splice(typeIndex + 1, 0, "Download");
+        } else if (!columnsToRender.includes("Download")) {
+            columnsToRender.push("Download");
+        }
+    }
+
+    columnsToRender.forEach(col => {
         const th = document.createElement("th");
         th.textContent = col;
 
@@ -300,11 +415,28 @@ function renderTable() {
     const end = start + CONFIG.rowsPerPage;
 
     const pageData = CONFIG.filteredData.slice(start, end);
+    const statusFilter = document.getElementById("statusFilter")?.value || "";
+    const columnsToRender = [...CONFIG.columns];
+    if (statusFilter === "Download") {
+        const typeIndex = columnsToRender.indexOf("Type");
+        if (typeIndex >= 0 && !columnsToRender.includes("Download")) {
+            columnsToRender.splice(typeIndex + 1, 0, "Download");
+        } else if (!columnsToRender.includes("Download")) {
+            columnsToRender.push("Download");
+        }
+    }
 
     tbody.innerHTML = pageData
         .map(row => `
             <tr>
-                ${CONFIG.columns.map(col => `<td>${row[col] || ""}</td>`).join("")}
+                ${columnsToRender
+                    .map(col => {
+                        if (col === "Download") {
+                            return `<td>${renderSearchCell(row)}</td>`;
+                        }
+                        return `<td>${row[col] || ""}</td>`;
+                    })
+                    .join("")}
             </tr>
         `)
         .join("");
@@ -394,11 +526,16 @@ function changePage(page) {
 function clearFilters() {
     const statusEl = document.getElementById("statusFilter");
     const typeEl = document.getElementById("typeFilter");
+    const siteEl = document.getElementById("siteFilter");
     const searchEl = document.getElementById("searchInput");
     const rowsSelect = document.getElementById("rowsPerPageSelect");
 
     if (statusEl) statusEl.value = "";
     if (typeEl) typeEl.value = "";
+    if (siteEl) {
+        siteEl.value = "";
+        CONFIG.site = "";
+    }
     if (searchEl) {
         searchEl.value = "";
         CONFIG.search = "";
@@ -438,7 +575,8 @@ async function init({ rowsPerPage = 10 } = {}) {
     // Load Excel and get normalized data directly
     const loadedData = await loadExcelOnce();
     CONFIG.data = Array.isArray(loadedData) ? loadedData : [];
-    CONFIG.columns = Object.keys(CONFIG.data[0] || {});
+
+    CONFIG.columns = Object.keys(CONFIG.data[0] || {}).filter(col => col !== "Search" && col !== "Download");
 
     syncFromURL();
 
@@ -487,6 +625,15 @@ async function init({ rowsPerPage = 10 } = {}) {
     if (typeFilter) typeFilter.addEventListener("change", () => {
         CONFIG.currentPage = 1;
         applyAll();
+        updateURL();
+        renderTable();
+        renderPagination();
+    });
+
+    const siteFilter = document.getElementById("siteFilter");
+    if (siteFilter) siteFilter.addEventListener("change", () => {
+        CONFIG.site = siteFilter.value;
+        CONFIG.currentPage = 1;
         updateURL();
         renderTable();
         renderPagination();

@@ -73,14 +73,14 @@ secondInput.addEventListener('input', () => {
 (async function () {
     try {
 
-        if (location.protocol === 'file:') {
+       
             const fileInputContainer = document.getElementById('fileInputContainer');
             if (fileInputContainer) {
                 fileInputContainer.style.display = 'block';
             }
 
             const notice = document.createElement('div');
-        }
+        
 
         if (typeof init !== 'function') {
             throw new Error('init() not found. Make sure js/data.js loads before js/main.js.');
