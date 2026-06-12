@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="fa">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta http equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="Css/bootstrap.min.css" />
+    <link rel="stylesheet" href="Css/bootstrap-Icon.min.css" />
+    <link rel="stylesheet" href="Css/newAnimate.css" />
+    <link rel="stylesheet" href="Css/Style.css" />
+    <link rel="shortcut icon" href="Image/favicon.ico" type="image/x-icon">
+    <title>Series</title>
+</head>
+
+<body>
+
+    <div class="Navbar-class">
+        <div class="container py-md-4 py-3">
+            <div class="row">
+                <div class="col-md-8 col-3">
+                    <nav class="navbar navbar-expand-lg">
+                        <button class="navbar-toggler first-button" type="button" data-bs-toggle="collapse"
+                            data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent"
+                            aria-expanded="false" aria-label="">
+                            <div class="animated-icon1"><span></span><span></span><span></span></div>
+                        </button>
+                        <div class="collapse navbar-collapse" id="navbarSupportedContent">
+                            <ul class="navbar-nav">
+                                <li class="nav-item active">
+                                    <a class="nav-link" href="/">Home</a>
+                                </li>
+                            </ul>
+                        </div>
+                    </nav>
+                </div>
+                <div class="col-md-3 col-6">
+                    <div class="SideNav">
+                        <div class="ChangeThemeBox">
+                            <div class="CustomColorPicker">
+                                <input type="color" id="firstColorInput">
+                                <input type="color" id="secondColorInput">
+                            </div>
+                            <button class="ChangeColorBtn" onclick="changeColor()">
+                                <span class="color01">.</span>
+                                <span class="color02">.</span>
+                            </button>
+                            <button class="ChangeColorBtn ChangeColorBtn01" onclick="changeColor01()">
+                                <span class="color01">.</span>
+                                <span class="color02">.</span>
+                            </button>
+                            <div id="ThemeBoxSwitch">
+                                <input type="checkbox" class="checkbox" id="ThemeBoxSwitchInput">
+                                <label class="label" for="ThemeBoxSwitchInput">
+                                    <i class="bi bi-moon"></i>
+                                    <i class="bi bi-sun"></i>
+                                    <div class="ball"></div>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-1 col-3">
+                    <div class="logo-header">
+                        <a href="/"><img class="w-50" src="Image/logo.png" alt="pic"></a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <section class="HomePage Slider mt-0">
+        <div class="container">
+            <div class="row">
+                <div class="col-12 p-0">
+                    <div id="carouselExampleIndicators" class="carousel slide carousel-fade py-md-4 py-3">
+                        <div class="carousel-indicators">
+                            <button type="button" data-bs-target="#carouselExampleIndicators" data-bs-slide-to="0"
+                                class="active" aria-current="true" aria-label="Slide 1"></button>
+                            <button type="button" data-bs-target="#carouselExampleIndicators" data-bs-slide-to="1"
+                                aria-label="Slide 2"></button>
+                            <button type="button" data-bs-target="#carouselExampleIndicators" data-bs-slide-to="2"
+                                aria-label="Slide 3"></button>
+                            <button type="button" data-bs-target="#carouselExampleIndicators" data-bs-slide-to="3"
+                                aria-label="Slide 4"></button>
+                            <button type="button" data-bs-target="#carouselExampleIndicators" data-bs-slide-to="4"
+                                aria-label="Slide 5"></button>
+                        </div>
+                        <div class="carousel-inner">
+                            <div class="carousel-item active">
+                                <img class="d-block w-100" src="Image/Slider01.jpg" alt="First slide">
+                            </div>
+                            <div class="carousel-item">
+                                <img class="d-block w-100" src="Image/Slider02.jpg" alt="Second slide">
+                            </div>
+                            <div class="carousel-item">
+                                <img class="d-block w-100" src="Image/Slider03.jpg" alt="Third slide">
+                            </div>
+                            <div class="carousel-item">
+                                <img class="d-block w-100" src="Image/Slider04.jpg" alt="Third slide">
+                            </div>
+                            <div class="carousel-item">
+                                <img class="d-block w-100" src="Image/Slider05.png" alt="Third slide">
+                            </div>
+                        </div>
+                        <button class="carousel-control-prev" type="button" data-bs-target="#carouselExampleIndicators"
+                            data-bs-slide="prev">
+                            <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+                            <span class="visually-hidden">Previous</span>
+                        </button>
+                        <button class="carousel-control-next" type="button" data-bs-target="#carouselExampleIndicators"
+                            data-bs-slide="next">
+                            <span class="carousel-control-next-icon" aria-hidden="true"></span>
+                            <span class="visually-hidden">Next</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </section>
+    <section class="HomePage Table">
+        <div class="container">
+            <div class="row">
+                <div class="col-12">
+                    <div class="input-group shadow-sm">
+                        <span class="input-group-text">
+                            <i class="bi bi-search"></i>
+                        </span>
+                        <input id="searchInput" class="form-control" placeholder="Search movies, anime..." />
+                    </div>
+                </div>
+            </div>
+            <div class="row g-3 align-items-end my-4">
+                <!-- STATUS -->
+                <div class="col-lg-2 col-md-4 col-6">
+                    <label class="form-label small fw-semibold">Status</label>
+                    <select id="statusFilter" class="form-select">
+                        <option value="">All Status</option>
+                        <option value="Download">Download</option>
+                        <option value="Finished">Finished</option>
+                        <option value="On Going">On Going</option>
+                    </select>
+                </div>
+
+                <!-- TYPE -->
+                <div class="col-lg-2 col-md-4 col-6">
+                    <label class="form-label small fw-semibold">Type</label>
+                    <select id="typeFilter" class="form-select">
+                        <option value="">All Type</option>
+                        <option value="Animation">Animation</option>
+                        <option value="Anime">Anime</option>
+                        <option value="Korea">Korea</option>
+                    </select>
+                </div>
+
+                <!-- ROWS -->
+                <div class="col-lg-2 col-md-4 col-6">
+                    <label class="form-label small fw-semibold">Rows</label>
+                    <select id="rowsPerPageSelect" class="form-select">
+                        <option value="5">5 rows</option>
+                        <option value="10" selected>10 rows</option>
+                        <option value="20">20 rows</option>
+                        <option value="50">50 rows</option>
+                        <option value="100">100 rows</option>
+                    </select>
+                </div>
+
+                <!-- FILE -->
+                <div class="col-lg-3 col-md-6 col-12" id="fileInputContainer" style="display: none;">
+                    <label class="form-label small fw-semibold">Excel File</label>
+                    <input id="excelFileInput" type="file" class="form-control" accept=".xlsx,.xls" />
+                </div>
+
+                <!-- CLEAR -->
+                <div class="col-lg-2 col-md-6 col-12">
+                    <button id="clearFiltersBtn" class="btn btn-outline-danger">
+                        <i class="bi bi-x-circle me-1"></i>
+                        Clear Filters
+                    </button>
+                </div>
+
+            </div>
+            <div class="row">
+                <div class="col-12">
+                    <!-- TABLE -->
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead>
+                                <tr id="tableHead"></tr>
+                            </thead>
+                            <tbody id="tableBody"></tbody>
+                        </table>
+                    </div>
+                    <!-- PAGINATION -->
+                    <nav>
+                        <ul class="pagination" id="pagination"></ul>
+                    </nav>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <div class="container">
+            <div class="row">
+                <div class="col-md-4 col-12 wow fadeInUp" data-wow-delay=".3s">
+                    <div class="footer-box footer-address">
+                        <div class="logo-footer">
+                            <a href="/"><img class="w-50" src="Image/logo.png" alt="pic"></a>
+                        </div>
+                        <p>Lorem Ipsum is a <span>fake text</span> produced by the printing industry with the help of
+                            graphic designers.
+                        </p>
+                        <ul class="sm-list">
+                            <li><a href="#" target="_blank"><i class="bi bi-instagram"></i></a></li>
+                            <li><a href="#" target="_blank"><i class="bi bi-telegram"></i></a></li>
+                            <li><a href="#" target="_blank"><i class="bi bi-whatsapp"></i></a></li>
+                            <li><a href="#" target="_blank"><i class="bi bi-twitter"></i></a></li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="col-md-1 col-12"></div>
+                <div class="col-md-3 col-12 wow fadeInUp" data-wow-delay=".5s">
+                    <div class="footer-box footer-links">
+                        <h5><span>Quick </span>access</h5>
+                        <ul>
+                            <li><i class="bi bi-chevron-double-right"></i><a href="/">Home</a></li>
+                            <li><i class="bi bi-chevron-double-right"></i><a href="#">About us</a></li>
+                            <li><i class="bi bi-chevron-double-right"></i><a href="#">Contact us</a></li>
+                            <li><i class="bi bi-chevron-double-right"></i><a href="#">Products</a></li>
+                        </ul>
+                    </div>
+
+
+                </div>
+                <div class="col-md-4 col-12 wow fadeInUp" data-wow-delay=".7s">
+                    <div class="footer-box footer-contact">
+                        <h5><span>Communicative </span>ways</h5>
+                        <ul>
+                            <li><i class="bi bi-geo-alt-fill"></i><a href="#">address</a></li>
+                            <li><i class="bi bi-phone"></i><a href="tel:+982177123456">021-77123456</a></li>
+                            <li><i class="bi bi-telephone"></i><a href="tel:+982177123456">021-77123456</a></li>
+                            <li><i class="bi bi-envelope-at"></i><a
+                                    href="mailto:example@support.com">example@support.com</a></li>
+                        </ul>
+
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-12 text-center">
+                    <div class="copyright">
+                        <p>Copyright © 2026 for Series. Designed by <a href="http://nextlancer.ir/" title="nextlancer"
+                                target="_blank">Next Lancer</a>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+
+
+
+
+
+
+    <script src="js/bootstrap.min.js"></script>
+    <script src="js/wow.min.js"></script>
+    <script src="js/xlsx.full.min.js"></script>
+    <script src="js/data.js"></script>
+    <script src="js/main.js"></script>
+    <script src="js/source.js"></script>
+
+
+</body>
+
+</html>
