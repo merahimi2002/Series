@@ -304,7 +304,7 @@ async function fetchTVMazeSeries(seriesTitle) {
 function calculateMissing(localEpisodes, tvmazeSeasons) {
 
     if (!tvmazeSeasons) {
-        return { status: "N/A", reasons: [] };
+        return { status: "N/A",reasons:["TVMaze: show not found"] };
     }
 
     const localMap = parseEpisodes(localEpisodes);
@@ -827,7 +827,7 @@ function renderTableHead() {
 function missingBadgeHTML(entry, row) {
     // Back-compat: plain strings from old localStorage cache
     if (typeof entry === "string") {
-        entry = { status: entry, reasons: [] };
+        entry = { status: entry, reasons: ["."] };
     }
 
     const { status, reasons } = entry;
@@ -1118,8 +1118,8 @@ async function resolveMissingForRow(row) {
     // cell stuck on "Loading..." forever. Resolve them immediately instead.
     if (!seriesTitle) {
         if (missingValuesMap[""] !== "N/A") {
-            missingValuesMap[""] = { status: "N/A", reasons: [] };
-            updateMissingCellInDOM("", { status: "N/A", reasons: [] });
+            missingValuesMap[""] = { status: "N/A", reasons:["Missing series title"] };
+            updateMissingCellInDOM("", { status: "N/A", reasons: ["Missing series title"] });
         }
         return;
     }
@@ -1141,7 +1141,7 @@ async function resolveMissingForRow(row) {
         const episodesStr = getEpisodesString(row);
 
         if (!episodesStr) {
-            missingValuesMap[seriesTitle] = { status: "N/A", reasons: [] };
+            missingValuesMap[seriesTitle] = { status: "N/A", reasons:["No episode data"] };
             return;
         }
 
@@ -1149,10 +1149,10 @@ async function resolveMissingForRow(row) {
 
         missingValuesMap[seriesTitle] = tvmazeData
             ? calculateMissing(episodesStr, tvmazeData.seasons)
-            : { status: "N/A", reasons: [] };
+            : { status: "N/A", reasons: ["TVMaze: show not found"] };
 
     } catch {
-        missingValuesMap[seriesTitle] = { status: "Error", reasons: [] };
+        missingValuesMap[seriesTitle] = { status: "Error", reasons: ["Failed to fetch TVMaze data"] };
         missingLoaderStats.errorCount++;
     } finally {
         missingFetchInFlight.delete(seriesTitle);
