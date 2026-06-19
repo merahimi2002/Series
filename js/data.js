@@ -98,22 +98,32 @@ function logRowDebugInfo(row, index) {
 }
 
 // Parse episodes string like "S01E01-10\nS02E01-13" into structured data
+// Returns { seasonNumber: { start, end } } or {} if nothing parseable
 function parseEpisodes(episodesStr) {
-    if (!episodesStr) {
-        missingValuesMap[seriesTitle] = "N/A";
-        return;
-    }
+    if (!episodesStr) return {};
 
     const seasonMap = {};
     const lines = episodesStr.split(/[\n,]/).map(s => s.trim()).filter(s => s);
 
     for (const line of lines) {
-        const match = line.match(/S(\d+)E(\d+)-(\d+)/i);
+        // Primary format:  S01E01-10
+        let match = line.match(/S(\d+)E(\d+)[\-–](\d+)/i);
         if (match) {
             const season = parseInt(match[1], 10);
-            const start = parseInt(match[2], 10);
-            const end = parseInt(match[3], 10);
-            seasonMap[season] = { start, end };
+            seasonMap[season] = {
+                start: parseInt(match[2], 10),
+                end:   parseInt(match[3], 10),
+            };
+            continue;
+        }
+        // Fallback format: S01E10  (single episode — treat end = that ep number)
+        match = line.match(/S(\d+)E(\d+)/i);
+        if (match) {
+            const season = parseInt(match[1], 10);
+            const ep     = parseInt(match[2], 10);
+            if (!seasonMap[season] || seasonMap[season].end < ep) {
+                seasonMap[season] = { start: 1, end: ep };
+            }
         }
     }
 
@@ -234,29 +244,46 @@ async function fetchTVMazeSeries(seriesTitle) {
     }
 }
 
-// Compare local episodes with TVMaze data and generate missing string
+// Compare local episodes with TVMaze data.
+// Returns { status: "Complete"|"Has Missing"|"N/A", reasons: string[] }
+// reasons is populated only when status === "Has Missing", e.g.:
+//   ["S02: have E01-10, TVMaze has 13", "S03: fully missing (8 eps)"]
 function calculateMissing(localEpisodes, tvmazeSeasons) {
 
     if (!tvmazeSeasons) {
-        return "N/A";
+        return { status: "N/A", reasons: [] };
     }
 
     const localMap = parseEpisodes(localEpisodes);
+    const reasons = [];
+
+    // Debug: if localMap is empty but we have episode data, the format isn't matching
+    if (Object.keys(localMap).length === 0 && localEpisodes) {
+        console.warn("[Missing] parseEpisodes returned empty for:", localEpisodes);
+    }
 
     for (const [seasonStr, totalEpisodes] of Object.entries(tvmazeSeasons)) {
 
         const season = parseInt(seasonStr, 10);
+        const label = `S${String(season).padStart(2, "0")}`;
 
         if (!localMap[season]) {
-            return "Has Missing";
+            reasons.push(`${label}: fully missing (${totalEpisodes} eps)`);
+            continue;
         }
 
         if (localMap[season].end < totalEpisodes) {
-            return "Has Missing";
+            reasons.push(
+                `${label}: have E01-${String(localMap[season].end).padStart(2, "0")}, ` +
+                `TVMaze has ${totalEpisodes}`
+            );
         }
     }
 
-    return "Complete";
+    return {
+        status: reasons.length > 0 ? "Has Missing" : "Complete",
+        reasons,
+    };
 }
 
 // Get missing episodes for a row (async)
@@ -591,8 +618,10 @@ function applyAll() {
             const title = Object.values(item).find(v => typeof v === "string") || "";
             const seriesTitle = getSeriesTitle(item);
 
-            const rowMissingValue =
-                missingValuesMap[seriesTitle] || "";
+            const cachedEntry = missingValuesMap[seriesTitle];
+            const rowMissingValue = cachedEntry
+                ? (typeof cachedEntry === "string" ? cachedEntry : cachedEntry.status)
+                : "";
             if (missing === "Has Missing") {
                 missingMatch = rowMissingValue === "Has Missing";
             } else {
@@ -650,6 +679,13 @@ function renderTableHead() {
 
     const statusFilter = document.getElementById("statusFilter")?.value || "";
     const columnsToRender = [...CONFIG.columns];
+
+    // Missing always goes right after Type
+    if (!columnsToRender.includes("Missing")) {
+        const typeIdx = columnsToRender.indexOf("Type");
+        columnsToRender.splice(typeIdx >= 0 ? typeIdx + 1 : columnsToRender.length, 0, "Missing");
+    }
+
     if (statusFilter === "Download") {
         const typeIndex = columnsToRender.indexOf("Type");
         if (typeIndex >= 0 && !columnsToRender.includes("Download")) {
@@ -657,11 +693,6 @@ function renderTableHead() {
         } else if (!columnsToRender.includes("Download")) {
             columnsToRender.push("Download");
         }
-    }
-
-    // Always add Missing column after Download or at end
-    if (!columnsToRender.includes("Missing")) {
-        columnsToRender.push("Missing");
     }
 
     columnsToRender.forEach(col => {
@@ -687,15 +718,122 @@ function renderTableHead() {
 // hit from a previous resolution), show it immediately -- this is what stops
 // "Loading..." from reappearing forever once the loader has already finished
 // for that series, e.g. after changing page, sorting, or filtering.
+
+// =====================
+// MISSING BADGE RENDERER
+// =====================
+
+// Accepts a {status, reasons} object (or plain string for back-compat) and
+// an optional row object. Returns the badge + tooltip + popover HTML.
+// When status === "Has Missing", download buttons are appended inside the popover.
+function missingBadgeHTML(entry, row) {
+    // Back-compat: plain strings from old localStorage cache
+    if (typeof entry === "string") {
+        entry = { status: entry, reasons: [] };
+    }
+
+    const { status, reasons } = entry;
+
+    const badgeCls = {
+        "Complete":    "rounded-pill text-bg-success",
+        "Has Missing": "rounded-pill text-bg-warning",
+        "N/A":         "rounded-pill text-bg-info",
+        "Error":       "rounded-pill text-bg-danger",
+    }[status] || "bg-secondary";
+
+    // Tooltip: one-line summary shown on hover
+    const tooltipText = reasons.length
+        ? reasons.join(" | ")
+        : status;
+
+    if (!reasons.length) {
+        // No detail to show — just a plain badge with tooltip
+        return `<span class="badge ${badgeCls}"
+            data-bs-toggle="tooltip"
+            data-bs-placement="top"
+            title="${tooltipText.replace(/"/g, "&quot;")}"
+            style="cursor:default">${status}</span>`;
+    }
+
+    // Reasons table
+    const reasonRows = reasons
+        .map(r => `<tr><td style="white-space:nowrap;padding:2px 6px">${r}</td></tr>`)
+        .join("");
+    let popoverContent = `<table class="table mb-0">${reasonRows}</table>`;
+
+    // Download buttons — only for "Has Missing" rows when we have a row object
+    if (status === "Has Missing" && row) {
+        const title = getSearchTitle(row);
+        if (title) {
+            const activeSites = CONFIG.site
+                ? [CONFIG.site]
+                : Object.keys(SEARCH_SITES);
+
+            const btns = activeSites
+                .map(key => {
+                    const site = SEARCH_SITES[key];
+                    if (!site || !site.url) return "";
+                    const href = `${site.url}${encodeURIComponent(title)}`;
+                    return `<a href="${href}" target="_blank" rel="noopener noreferrer"
+                        class="btn btn-sm btn-outline-success me-1 mt-1">${site.label}</a>`;
+                })
+                .join("");
+
+            if (btns) {
+                popoverContent +=
+                    `<hr class="my-2">` +
+                    `<div class="d-flex flex-wrap">${btns}</div>`;
+            }
+        }
+    }
+
+    return `<span class="badge ${badgeCls} missing-detail-badge"
+        data-bs-toggle="popover"
+        data-bs-trigger="click"
+        data-bs-placement="bottom"
+        data-bs-html="true"
+         data-bs-title="${tooltipText.replace(/\|/g, "<br>")}"
+        data-bs-content="${popoverContent.replace(/"/g, "&quot;")}"
+        title="${tooltipText.replace(/"/g, "&quot;")}"
+        style="cursor:pointer">${status} <i class="bi bi-exclamation-triangle"></i> </span>`;
+}
+
+// Init Bootstrap tooltips + popovers on all missing badges in the DOM.
+// Called after every table render.
+function initMissingBadgeInteractivity() {
+    // Destroy existing instances first to avoid duplicates
+    document.querySelectorAll(".missing-detail-badge").forEach(el => {
+        const pop = bootstrap.Popover.getInstance(el);
+        if (pop) pop.dispose();
+    });
+    document.querySelectorAll("[data-bs-toggle='tooltip']").forEach(el => {
+        const tt = bootstrap.Tooltip.getInstance(el);
+        if (tt) tt.dispose();
+        new bootstrap.Tooltip(el);
+    });
+    // Close any open popover when clicking outside
+    document.querySelectorAll(".missing-detail-badge").forEach(el => {
+        new bootstrap.Popover(el);
+    });
+    document.addEventListener("click", e => {
+        if (!e.target.closest(".missing-detail-badge") && !e.target.closest(".popover")) {
+            document.querySelectorAll(".missing-detail-badge").forEach(el => {
+                const pop = bootstrap.Popover.getInstance(el);
+                if (pop) pop.hide();
+            });
+        }
+    }, { capture: true, once: false });
+}
+
 function renderMissingCell(row) {
     const seriesTitle = getSeriesTitle(row);
-    const safeSeries = seriesTitle.replace(/"/g, '&quot;');
-    const safeEpisodes = getEpisodesString(row).replace(/"/g, '&quot;');
-    const cachedValue = missingValuesMap[seriesTitle];
+    const safeSeries = seriesTitle.replace(/"/g, "&quot;");
+    const safeEpisodes = getEpisodesString(row).replace(/"/g, "&quot;");
+    const cachedEntry = missingValuesMap[seriesTitle];
 
-    const content = cachedValue
-        ? `<span class="missing-value">${cachedValue}</span>`
-        : `<span class="missing-loading">Loading...</span>`;
+    const content = cachedEntry
+        ? missingBadgeHTML(cachedEntry, row)
+        : `<span class="missing-loading text-muted small">Loading...</span>`;
 
     return `<td class="missing-cell" data-series="${safeSeries}" data-episodes="${safeEpisodes}">${content}</td>`;
 }
@@ -710,6 +848,13 @@ function renderTable() {
     const pageData = CONFIG.filteredData.slice(start, end);
     const statusFilter = document.getElementById("statusFilter")?.value || "";
     const columnsToRender = [...CONFIG.columns];
+
+    // Missing always goes right after Type
+    if (!columnsToRender.includes("Missing")) {
+        const typeIdx = columnsToRender.indexOf("Type");
+        columnsToRender.splice(typeIdx >= 0 ? typeIdx + 1 : columnsToRender.length, 0, "Missing");
+    }
+
     if (statusFilter === "Download") {
         const typeIndex = columnsToRender.indexOf("Type");
         if (typeIndex >= 0 && !columnsToRender.includes("Download")) {
@@ -717,11 +862,6 @@ function renderTable() {
         } else if (!columnsToRender.includes("Download")) {
             columnsToRender.push("Download");
         }
-    }
-
-    // Always add Missing column
-    if (!columnsToRender.includes("Missing")) {
-        columnsToRender.push("Missing");
     }
 
     tbody.innerHTML = pageData
@@ -744,6 +884,7 @@ function renderTable() {
 
     // Load missing episodes asynchronously for visible cells
     loadMissingEpisodesForVisibleCells();
+    initMissingBadgeInteractivity();
 }
 
 // =====================
@@ -835,12 +976,15 @@ setInterval(() => {
 // Push a freshly computed value straight into any matching cell(s) on screen.
 // This is what actually fixes the "stuck on Loading..." problem: previously the
 // DOM was only updated once *all* ~800 rows had been processed.
-function updateMissingCellInDOM(seriesTitle, value) {
+function updateMissingCellInDOM(seriesTitle, entry) {
     const safeTitle = (seriesTitle || "").replace(/"/g, '\\"');
     const cells = document.querySelectorAll(`.missing-cell[data-series="${safeTitle}"]`);
+    // Find the matching row object so missingBadgeHTML can render download buttons
+    const matchedRow = CONFIG.data.find(r => getSeriesTitle(r) === seriesTitle) || null;
     cells.forEach(cell => {
-        cell.innerHTML = `<span class="missing-value">${value}</span>`;
+        cell.innerHTML = missingBadgeHTML(entry, matchedRow);
     });
+    initMissingBadgeInteractivity();
 }
 
 // Resolve (and cache) the missing-episodes value for a single row, then
@@ -853,8 +997,8 @@ async function resolveMissingForRow(row) {
     // cell stuck on "Loading..." forever. Resolve them immediately instead.
     if (!seriesTitle) {
         if (missingValuesMap[""] !== "N/A") {
-            missingValuesMap[""] = "N/A";
-            updateMissingCellInDOM("", "N/A");
+            missingValuesMap[""] = { status: "N/A", reasons: [] };
+            updateMissingCellInDOM("", { status: "N/A", reasons: [] });
         }
         return;
     }
@@ -876,7 +1020,7 @@ async function resolveMissingForRow(row) {
         const episodesStr = getEpisodesString(row);
 
         if (!episodesStr) {
-            missingValuesMap[seriesTitle] = "N/A";
+            missingValuesMap[seriesTitle] = { status: "N/A", reasons: [] };
             return;
         }
 
@@ -884,10 +1028,10 @@ async function resolveMissingForRow(row) {
 
         missingValuesMap[seriesTitle] = tvmazeData
             ? calculateMissing(episodesStr, tvmazeData.seasons)
-            : "N/A";
+            : { status: "N/A", reasons: [] };
 
     } catch {
-        missingValuesMap[seriesTitle] = "Error";
+        missingValuesMap[seriesTitle] = { status: "Error", reasons: [] };
         missingLoaderStats.errorCount++;
     } finally {
         missingFetchInFlight.delete(seriesTitle);
@@ -1090,6 +1234,16 @@ async function init({ rowsPerPage = 10 } = {}) {
     tvmazeCache = JSON.parse(
         localStorage.getItem("tvmazeCache")
     ) || {};
+
+    // Clear old missingValuesMap cache if it contains plain strings (pre-reasons format).
+    // This forces a fresh lookup so reasons get populated correctly.
+    const rawMissingCache = JSON.parse(localStorage.getItem("missingValuesMap") || "{}");
+    const hasOldFormat = Object.values(rawMissingCache).some(v => typeof v === "string");
+    if (hasOldFormat) {
+        console.log("[Missing] Old string-format cache detected — clearing to rebuild with reasons.");
+        localStorage.removeItem("missingValuesMap");
+        Object.keys(missingValuesMap).forEach(k => delete missingValuesMap[k]);
+    }
 
     SEARCH_SITES.custom.url =
         localStorage.getItem("customSiteUrl") || "";
