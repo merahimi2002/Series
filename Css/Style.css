@@ -633,6 +633,21 @@ nav.navbar {
     opacity: 0.5;
 }
 
+/* progress */
+
+.progress {
+    height: 25px;
+    border-radius: var(--radius-custome);
+}
+
+.progress #missingProgressBar {
+    background-color: rgb(var(--first-color));
+    border-radius: var(--radius-custome);
+    color: white;
+    padding: 5px 10px;
+    height: 25px;
+}
+
 /* Start Footer */
 
 footer {

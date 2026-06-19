@@ -130,7 +130,22 @@
                     </div>
                 </div>
             </div>
-            <div class="row g-3 align-items-end my-4">
+            <div class="row my-4">
+                <div class="col-12">
+                    <input id="customSiteInput" class="form-control mt-2" placeholder="https://example.com/search?q=">
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-12">
+                    <div class="progress mb-3" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+                        <div id="missingProgressBar" class="progress-bar progress-bar-striped progress-bar-animated"
+                            style="width: 100%">
+                            100%
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="row g-3 align-items-end mb-4">
                 <!-- STATUS -->
                 <div class="col-lg col-md-4 col-6">
                     <label class="form-label small fw-semibold">Status</label>
@@ -160,6 +175,7 @@
                         <option value="">All Sites</option>
                         <option value="digimoviez">DigiMoviez</option>
                         <option value="f2my">F2MY</option>
+                        <option value="custom">Custom Site</option>
                     </select>
                 </div>
 

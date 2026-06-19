@@ -30,7 +30,10 @@ const CONFIG = {
 };
 
 // Store missing values for each row: { rowIndex: "Complete" | "Has Missing" | "N/A" | "Error" }
-let missingValuesMap = {};
+const missingValuesMap =
+    JSON.parse(
+        localStorage.getItem("missingValuesMap")
+    ) || {};
 
 const SEARCH_SITES = {
     digimoviez: {
@@ -41,18 +44,21 @@ const SEARCH_SITES = {
         label: "F2MY",
         url: "https://www.f2my.top/?s=",
     },
+    custom: {
+        label: "Custom",
+        url: "",
+    }
 };
 
-// =====================
-// TMDB INTEGRATION
-// =====================
-const TMDB_API_KEY = "0b35a2b2cfe90d204598249dcab395bb"; // Public readonly key
-const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 
-// Cache for TMDB results: { "Series Title": { seasons: {...}, timestamp: ... } }
-let tmdbCache = {};
+// =====================
+// TVMaze INTEGRATION
+// =====================
 
-// Helper to get series title for TMDB lookup
+// Cache for TVMaze results: { "Series Title": { seasons: {...}, timestamp: ... } }
+let tvmazeCache = {};
+
+// Helper to get series title for TVMaze lookup
 function getSeriesTitle(row) {
     const exactKeys = ["Serial Name", "serial name", "Serial name", "title", "Title", "Name", "name"];
     let title = getRowValue(row, exactKeys);
@@ -93,7 +99,10 @@ function logRowDebugInfo(row, index) {
 
 // Parse episodes string like "S01E01-10\nS02E01-13" into structured data
 function parseEpisodes(episodesStr) {
-    if (!episodesStr) return {};
+    if (!episodesStr) {
+        missingValuesMap[seriesTitle] = "N/A";
+        return;
+    }
 
     const seasonMap = {};
     const lines = episodesStr.split(/[\n,]/).map(s => s.trim()).filter(s => s);
@@ -111,104 +120,143 @@ function parseEpisodes(episodesStr) {
     return seasonMap;
 }
 
-// Fetch series info from TMDB
-async function fetchTMDBSeries(seriesTitle) {
-    if (!seriesTitle) {
-        console.log("fetchTMDBSeries: Empty series title");
-        return null;
+// =====================
+// RATE-LIMITED FETCH (no proxy needed: TVMaze's API sends its own CORS
+// headers, so it can be called directly from the browser. We still pace
+// and retry requests because TVMaze enforces its own rate limit: at least
+// 20 calls / 10 seconds per IP, with HTTP 429 if you go over it.)
+// =====================
+
+// Minimum time between any two outgoing TVMaze requests, system-wide.
+// TVMaze's own guidance is "wait 0.5s between requests and you'll never
+// hit the limit" -- that's exactly what this enforces, regardless of how
+// many rows are being processed "concurrently" on our side.
+const TVMAZE_REQUEST_INTERVAL_MS = 500;
+let nextAllowedRequestTime = 0;
+
+function waitForRateLimitSlot() {
+    return new Promise(resolve => {
+        const now = Date.now();
+        const wait = Math.max(0, nextAllowedRequestTime - now);
+        nextAllowedRequestTime = Math.max(now, nextAllowedRequestTime) + TVMAZE_REQUEST_INTERVAL_MS;
+        setTimeout(resolve, wait);
+    });
+}
+
+// Fetch a TVMaze API URL directly (no CORS proxy), automatically pacing
+// requests and retrying with exponential backoff on HTTP 429.
+async function fetchTVMazeDirect(targetUrl, retries = 4) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        await waitForRateLimitSlot();
+
+        const response = await fetch(targetUrl);
+
+        if (response.status === 429) {
+            const backoffMs = 1000 * Math.pow(2, attempt); // 1s, 2s, 4s, 8s, 16s
+            await new Promise(r => setTimeout(r, backoffMs));
+            continue;
+        }
+
+        if (!response.ok) {
+            throw new Error(`TVMaze request failed: ${response.status}`);
+        }
+
+        return response.json();
     }
 
-    console.log(`fetchTMDBSeries: Fetching "${seriesTitle}"`);
+    throw new Error("TVMaze: still rate-limited after retries");
+}
 
-    // Check cache first
-    if (tmdbCache[seriesTitle] && Date.now() - tmdbCache[seriesTitle].timestamp < 24 * 60 * 60 * 1000) {
-        console.log(`fetchTMDBSeries: "${seriesTitle}" found in cache`);
-        return tmdbCache[seriesTitle].data;
+// Fetch series info from TVMaze
+async function fetchTVMazeSeries(seriesTitle) {
+    if (!seriesTitle) return null;
+
+    if (
+        tvmazeCache[seriesTitle] &&
+        Date.now() - tvmazeCache[seriesTitle].timestamp < 86400000
+    ) {
+        return tvmazeCache[seriesTitle].data;
     }
 
     try {
-        const response = await fetch(
-            `${TMDB_BASE_URL}/search/tv?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(seriesTitle)}`
-        );
-        if (!response.ok) throw new Error(`TMDB API error: ${response.status}`);
 
-        const data = await response.json();
-        if (!data.results || data.results.length === 0) {
-            console.log(`fetchTMDBSeries: "${seriesTitle}" not found in TMDB`);
-            tmdbCache[seriesTitle] = { data: null, timestamp: Date.now() };
-            localStorage.setItem("tmdbCache", JSON.stringify(tmdbCache));
+        const searchData = await fetchTVMazeDirect(
+            `https://api.tvmaze.com/search/shows?q=${encodeURIComponent(seriesTitle)}`
+        );
+
+        if (!searchData.length) {
             return null;
         }
 
-        const series = data.results[0];
-        const seriesId = series.id;
+        const show = searchData[0].show;
 
-        // Fetch season/episode counts
-        const detailResponse = await fetch(
-            `${TMDB_BASE_URL}/tv/${seriesId}?api_key=${TMDB_API_KEY}`
+        const episodes = await fetchTVMazeDirect(
+            `https://api.tvmaze.com/shows/${show.id}/episodes`
         );
-        if (!detailResponse.ok) throw new Error(`TMDB detail API error: ${detailResponse.status}`);
 
-        const detailData = await detailResponse.json();
         const seasons = {};
 
-        // Build season map from TMDB data
-        if (detailData.seasons) {
-            for (const season of detailData.seasons) {
-                if (season.season_number > 0) { // Skip season 0 (specials)
-                    seasons[season.season_number] = season.episode_count || 0;
-                }
-            }
-        }
+        episodes.forEach(ep => {
 
-        const result = { seasons, title: series.name };
-        tmdbCache[seriesTitle] = { data: result, timestamp: Date.now() };
-        localStorage.setItem("tmdbCache", JSON.stringify(tmdbCache));
+            if (!ep.season || !ep.number) return;
+
+            if (!seasons[ep.season]) {
+                seasons[ep.season] = 0;
+            }
+
+            seasons[ep.season] = Math.max(
+                seasons[ep.season],
+                ep.number
+            );
+
+        });
+
+        const result = {
+            title: show.name,
+            seasons
+        };
+
+        tvmazeCache[seriesTitle] = {
+            data: result,
+            timestamp: Date.now()
+        };
+
+        localStorage.setItem(
+            "tvmazeCache",
+            JSON.stringify(tvmazeCache)
+        );
+
         return result;
+
     } catch (err) {
-        console.warn(`Failed to fetch TMDB data for "${seriesTitle}":`, err);
+        console.error(err);
         return null;
     }
 }
 
-// Compare local episodes with TMDB data and generate missing string
-function calculateMissing(localEpisodes, tmdbSeasons) {
-    if (!tmdbSeasons || Object.keys(tmdbSeasons).length === 0) {
-        return "Unknown"; // Can't determine missing if TMDB data unavailable
+// Compare local episodes with TVMaze data and generate missing string
+function calculateMissing(localEpisodes, tvmazeSeasons) {
+
+    if (!tvmazeSeasons) {
+        return "N/A";
     }
 
     const localMap = parseEpisodes(localEpisodes);
-    const missing = [];
 
-    // Find missing episodes at end of seasons
-    for (const [seasonStr, episodeCount] of Object.entries(tmdbSeasons)) {
+    for (const [seasonStr, totalEpisodes] of Object.entries(tvmazeSeasons)) {
+
         const season = parseInt(seasonStr, 10);
-        const localSeason = localMap[season];
 
-        if (!localSeason) {
-            // Entire season is missing
-            missing.push(`S${String(season).padStart(2, '0')}E01-${episodeCount}`);
-        } else if (localSeason.end < episodeCount) {
-            // Missing episodes at end of season
-            const startMissing = localSeason.end + 1;
-            missing.push(`S${String(season).padStart(2, '0')}E${String(startMissing).padStart(2, '0')}-${episodeCount}`);
+        if (!localMap[season]) {
+            return "Has Missing";
+        }
+
+        if (localMap[season].end < totalEpisodes) {
+            return "Has Missing";
         }
     }
 
-    // Find missing entire seasons (seasons after last local season)
-    if (Object.keys(localMap).length > 0) {
-        const maxLocalSeason = Math.max(...Object.keys(localMap).map(Number));
-        const maxTMDBSeason = Math.max(...Object.keys(tmdbSeasons).map(Number));
-
-        for (let season = maxLocalSeason + 1; season <= maxTMDBSeason; season++) {
-            const episodeCount = tmdbSeasons[season];
-            if (episodeCount) {
-                missing.push(`S${String(season).padStart(2, '0')}E01-${episodeCount}`);
-            }
-        }
-    }
-
-    return missing.length === 0 ? "Complete" : missing.join(", ");
+    return "Complete";
 }
 
 // Get missing episodes for a row (async)
@@ -221,12 +269,15 @@ async function getMissingEpisodes(row) {
     }
 
     try {
-        const tmdbData = await fetchTMDBSeries(seriesTitle);
-        if (!tmdbData) {
+        const tvmazeData = await fetchTVMazeSeries(seriesTitle);
+        if (!tvmazeData) {
             return "N/A"; // TMDB data not found
         }
 
-        return calculateMissing(episodesStr, tmdbData.seasons);
+        return calculateMissing(
+            episodesStr,
+            tvmazeData.seasons
+        );
     } catch (err) {
         console.error(`Error calculating missing for ${seriesTitle}:`, err);
         return "Error";
@@ -268,6 +319,7 @@ function getSearchButtonHTML(siteKey, title) {
     if (!title) return "";
     const site = SEARCH_SITES[siteKey];
     if (!site) return "";
+    if (!site.url) return "";
     const href = `${site.url}${encodeURIComponent(title)}`;
     return `
         <a
@@ -429,7 +481,7 @@ function normalizeHeaders(rawHeaders) {
 
     for (const rawHeader of rawHeaders) {
         let header = String(rawHeader || "").trim();
-        
+
         // If header is exactly "Season", treat it as Season01
         if (seasonHeaderRegex.test(header)) {
             seasonCount += 1;
@@ -536,10 +588,13 @@ function applyAll() {
         // Filter by missing status
         let missingMatch = true;
         if (missing) {
-            const rowMissingValue = missingValuesMap[index] || "Loading...";
+            const title = Object.values(item).find(v => typeof v === "string") || "";
+            const seriesTitle = getSeriesTitle(item);
+
+            const rowMissingValue =
+                missingValuesMap[seriesTitle] || "";
             if (missing === "Has Missing") {
-                // Match rows that have missing episodes (not "Complete", "N/A", "Unknown")
-                missingMatch = rowMissingValue !== "Complete" && rowMissingValue !== "N/A" && rowMissingValue !== "Unknown" && rowMissingValue !== "Error" && rowMissingValue !== "Loading...";
+                missingMatch = rowMissingValue === "Has Missing";
             } else {
                 missingMatch = rowMissingValue === missing;
             }
@@ -628,6 +683,23 @@ function renderTableHead() {
 }
 
 
+// Render a single Missing-column cell. If the value is already known (cache
+// hit from a previous resolution), show it immediately -- this is what stops
+// "Loading..." from reappearing forever once the loader has already finished
+// for that series, e.g. after changing page, sorting, or filtering.
+function renderMissingCell(row) {
+    const seriesTitle = getSeriesTitle(row);
+    const safeSeries = seriesTitle.replace(/"/g, '&quot;');
+    const safeEpisodes = getEpisodesString(row).replace(/"/g, '&quot;');
+    const cachedValue = missingValuesMap[seriesTitle];
+
+    const content = cachedValue
+        ? `<span class="missing-value">${cachedValue}</span>`
+        : `<span class="missing-loading">Loading...</span>`;
+
+    return `<td class="missing-cell" data-series="${safeSeries}" data-episodes="${safeEpisodes}">${content}</td>`;
+}
+
 function renderTable() {
     const tbody = CONFIG.tableBody;
     if (!tbody) return;
@@ -656,18 +728,16 @@ function renderTable() {
         .map((row, rowIndex) => `
             <tr data-row-index="${start + rowIndex}">
                 ${columnsToRender
-                    .map(col => {
-                        if (col === "Download") {
-                            return `<td>${renderSearchCell(row)}</td>`;
-                        }
-                        if (col === "Missing") {
-                            return `<td class="missing-cell" data-series="${getSeriesTitle(row).replace(/"/g, '&quot;')}" data-episodes="${getEpisodesString(row).replace(/"/g, '&quot;')}">
-                                <span class="missing-loading">Loading...</span>
-                            </td>`;
-                        }
-                        return `<td>${row[col] || ""}</td>`;
-                    })
-                    .join("")}
+                .map(col => {
+                    if (col === "Download") {
+                        return `<td>${renderSearchCell(row)}</td>`;
+                    }
+                    if (col === "Missing") {
+                        return renderMissingCell(row);
+                    }
+                    return `<td>${row[col] || ""}</td>`;
+                })
+                .join("")}
             </tr>
         `)
         .join("");
@@ -676,43 +746,207 @@ function renderTable() {
     loadMissingEpisodesForVisibleCells();
 }
 
-// Load missing episodes for currently visible cells
+// =====================
+// MISSING EPISODES LOADER (optimized: incremental DOM updates + limited concurrency)
+// =====================
+
+// Series titles currently being fetched, to avoid duplicate concurrent requests
+const missingFetchInFlight = new Set();
+
+// Guards against multiple overlapping "scan the whole dataset" passes
+let missingBackgroundLoaderRunning = false;
+
+// --- Diagnostics: lets you check from the console whether the loader is
+// actually making progress or stuck/broken, instead of just staring at
+// "Loading..." with no idea what's happening underneath. ---
+const missingLoaderStats = {
+    resolvedCount: 0,   // distinct series resolved so far (any outcome)
+    errorCount: 0,
+    lastProgressAt: Date.now(),
+    startedAt: Date.now(),
+};
+
+// Total distinct series titles that exist in the loaded sheet. Computed once
+// the data is loaded (see init()) so progress % is meaningful.
+let missingLoaderTotalSeries = 0;
+
+function updateMissingProgressBar() {
+    const resolved = Object.keys(missingValuesMap).length;
+    const total = missingLoaderTotalSeries || 0;
+
+    const percent = total
+        ? Math.round((resolved / total) * 100)
+        : 0;
+
+    const progressBar = document.getElementById("missingProgressBar");
+
+    if (!progressBar) return;
+
+    progressBar.style.width = `${percent}%`;
+    progressBar.textContent = `${percent}%`;
+    progressBar.setAttribute("aria-valuenow", percent);
+
+    if (percent >= 100) {
+        progressBar.classList.remove(
+            "progress-bar-striped",
+            "progress-bar-animated"
+        );
+    }
+}
+
+function getMissingLoaderStatus() {
+    const resolved = Object.keys(missingValuesMap).length;
+    const secondsSinceProgress = Math.round((Date.now() - missingLoaderStats.lastProgressAt) / 1000);
+    return {
+        resolved,
+        total: missingLoaderTotalSeries,
+        pending: Math.max(0, missingLoaderTotalSeries - resolved),
+        errors: missingLoaderStats.errorCount,
+        secondsSinceLastProgress: secondsSinceProgress,
+        likelyStuck: secondsSinceProgress > 30 && resolved < missingLoaderTotalSeries,
+    };
+}
+window.getMissingLoaderStatus = getMissingLoaderStatus;
+
+function logMissingLoaderProgress() {
+    const s = getMissingLoaderStatus();
+    missingLoaderStats.lastProgressAt = Date.now();
+    updateMissingProgressBar()
+    // Log every 10 resolutions (not every single one) to avoid flooding the console.
+    // if (s.resolved % 10 === 0 || s.pending === 0) {
+    //     const pct = s.total ? Math.round((s.resolved / s.total) * 100) : 0;
+    //     console.log(`[Missing Loader] ${s.resolved}/${s.total} series resolved (${pct}%)${s.pending === 0 ? " — done." : ""}`);
+    // }
+}
+
+// Watchdog: if nothing has changed in 30s while work is still pending,
+// say so explicitly instead of leaving you guessing whether it's stuck.
+setInterval(() => {
+    const s = getMissingLoaderStatus();
+    if (s.likelyStuck) {
+        console.warn(
+            `[Missing Loader] No progress in ${s.secondsSinceLastProgress}s. ` +
+            `${s.pending} series still pending. Check the Network tab for requests to ` +
+            `api.tvmaze.com that are failing/blocked — that's the actual cause if you see this.`
+        );
+    }
+}, 15000);
+
+// Push a freshly computed value straight into any matching cell(s) on screen.
+// This is what actually fixes the "stuck on Loading..." problem: previously the
+// DOM was only updated once *all* ~800 rows had been processed.
+function updateMissingCellInDOM(seriesTitle, value) {
+    const safeTitle = (seriesTitle || "").replace(/"/g, '\\"');
+    const cells = document.querySelectorAll(`.missing-cell[data-series="${safeTitle}"]`);
+    cells.forEach(cell => {
+        cell.innerHTML = `<span class="missing-value">${value}</span>`;
+    });
+}
+
+// Resolve (and cache) the missing-episodes value for a single row, then
+// immediately reflect it in the DOM if that row is currently visible.
+async function resolveMissingForRow(row) {
+    const seriesTitle = getSeriesTitle(row);
+
+    // Rows with no title we can match to a series can never be looked up on
+    // TVMaze. Previously these rows were skipped entirely, which left their
+    // cell stuck on "Loading..." forever. Resolve them immediately instead.
+    if (!seriesTitle) {
+        if (missingValuesMap[""] !== "N/A") {
+            missingValuesMap[""] = "N/A";
+            updateMissingCellInDOM("", "N/A");
+        }
+        return;
+    }
+
+    // Already known: just make sure the DOM reflects it (covers any cell that
+    // was rendered before this value got cached) and stop -- no network call.
+    if (missingValuesMap[seriesTitle]) {
+        updateMissingCellInDOM(seriesTitle, missingValuesMap[seriesTitle]);
+        return;
+    }
+
+    if (missingFetchInFlight.has(seriesTitle)) {
+        return;
+    }
+
+    missingFetchInFlight.add(seriesTitle);
+
+    try {
+        const episodesStr = getEpisodesString(row);
+
+        if (!episodesStr) {
+            missingValuesMap[seriesTitle] = "N/A";
+            return;
+        }
+
+        const tvmazeData = await fetchTVMazeSeries(seriesTitle);
+
+        missingValuesMap[seriesTitle] = tvmazeData
+            ? calculateMissing(episodesStr, tvmazeData.seasons)
+            : "N/A";
+
+    } catch {
+        missingValuesMap[seriesTitle] = "Error";
+        missingLoaderStats.errorCount++;
+    } finally {
+        missingFetchInFlight.delete(seriesTitle);
+        updateMissingCellInDOM(seriesTitle, missingValuesMap[seriesTitle]);
+        logMissingLoaderProgress();
+    }
+}
+
+// Process a list of rows with a small worker pool instead of one-by-one with a
+// fixed 150ms delay. This is the main speed-up for large sheets (~800 rows):
+// several TVMaze lookups happen in parallel instead of strictly sequentially.
+async function processRowsWithConcurrency(rows, concurrency = 5) {
+    let cursor = 0;
+
+    async function worker() {
+        while (cursor < rows.length) {
+            const row = rows[cursor++];
+            await resolveMissingForRow(row);
+        }
+    }
+
+    const workerCount = Math.max(1, Math.min(concurrency, rows.length));
+    await Promise.all(Array.from({ length: workerCount }, worker));
+
+    localStorage.setItem(
+        "missingValuesMap",
+        JSON.stringify(missingValuesMap)
+    );
+}
+
+// Load missing episodes: the rows on the *current page* are resolved first
+// (so the user sees real values quickly instead of "Loading..."), then the
+// rest of the filtered dataset is resolved in the background, in batches,
+// without blocking the UI or re-scanning rows that are already cached.
 async function loadMissingEpisodesForVisibleCells() {
-    const missingCells = document.querySelectorAll(".missing-cell");
-    console.log(`loadMissingEpisodesForVisibleCells: Processing ${missingCells.length} cells`);
+    const start = (CONFIG.currentPage - 1) * CONFIG.rowsPerPage;
+    const end = start + CONFIG.rowsPerPage;
+    const visibleRows = CONFIG.filteredData.slice(start, end);
 
-    for (const cell of missingCells) {
-        const seriesTitle = cell.getAttribute("data-series");
-        const episodesStr = cell.getAttribute("data-episodes");
-        const rowIndex = parseInt(cell.closest("tr")?.getAttribute("data-row-index"), 10);
+    // 1) Fast path: resolve what the user can actually see right now.
+    await processRowsWithConcurrency(visibleRows, 5);
 
-        console.log(`Cell ${rowIndex}: seriesTitle="${seriesTitle}", episodesStr="${episodesStr}"`);
+    // 2) Background path: fill in the rest of the filtered rows so that
+    //    filtering/sorting by "Missing" keeps working across the whole sheet.
+    //    Guarded so navigating pages quickly doesn't spawn N overlapping scans.
+    if (missingBackgroundLoaderRunning) return;
+    missingBackgroundLoaderRunning = true;
 
-        if (!seriesTitle || !episodesStr) {
-            console.log(`Cell ${rowIndex}: Missing seriesTitle or episodesStr - setting N/A`);
-            cell.innerHTML = "N/A";
-            if (!Number.isNaN(rowIndex)) missingValuesMap[rowIndex] = "N/A";
-            continue;
-        }
+    try {
+        const remainingRows = CONFIG.filteredData.filter(row => {
+            const title = getSeriesTitle(row);
+            // Untitled rows are always retried (cheap no-op once resolved);
+            // titled rows are retried only while still uncached.
+            return title ? !missingValuesMap[title] : missingValuesMap[""] !== "N/A";
+        });
 
-        try {
-            const tmdbData = await fetchTMDBSeries(seriesTitle);
-            if (!tmdbData) {
-                console.log(`Cell ${rowIndex}: No TMDB data found - setting N/A`);
-                cell.innerHTML = "N/A";
-                if (!Number.isNaN(rowIndex)) missingValuesMap[rowIndex] = "N/A";
-                continue;
-            }
-
-            const missingStr = calculateMissing(episodesStr, tmdbData.seasons);
-            console.log(`Cell ${rowIndex}: Calculated missing="${missingStr}"`);
-            cell.innerHTML = `<span class="missing-value">${missingStr}</span>`;
-            if (!Number.isNaN(rowIndex)) missingValuesMap[rowIndex] = missingStr;
-        } catch (err) {
-            console.error(`Error loading missing for ${seriesTitle}:`, err);
-            cell.innerHTML = "Error";
-            if (!Number.isNaN(rowIndex)) missingValuesMap[rowIndex] = "Error";
-        }
+        await processRowsWithConcurrency(remainingRows, 5);
+    } finally {
+        missingBackgroundLoaderRunning = false;
     }
 }
 
@@ -852,26 +1086,51 @@ async function init({ rowsPerPage = 10 } = {}) {
     CONFIG.tableHead = document.getElementById("tableHead");
     CONFIG.pagination = document.getElementById("pagination");
 
-    // Load TMDB cache from localStorage
-    tmdbCache = JSON.parse(localStorage.getItem("tmdbCache")) || {};
+    // Load TVMaze cache from localStorage
+    tvmazeCache = JSON.parse(
+        localStorage.getItem("tvmazeCache")
+    ) || {};
+
+    SEARCH_SITES.custom.url =
+        localStorage.getItem("customSiteUrl") || "";
 
     // Load Excel and get normalized data directly
     const loadedData = await loadExcelOnce();
     CONFIG.data = Array.isArray(loadedData) ? loadedData : [];
+    console.log(
+        "Missing cache:",
+        Object.keys(missingValuesMap).length,
+        "items"
+    );
+
+    // For the "X/Y resolved" progress diagnostics in the Missing loader.
+    missingLoaderTotalSeries = new Set(CONFIG.data.map(getSeriesTitle)).size;
 
     CONFIG.columns = Object.keys(CONFIG.data[0] || {}).filter(col => col !== "Search" && col !== "Download");
 
     // Debug: Log data structure
-    console.log("=== EXCEL DATA LOADED ===");
-    console.log("Total rows:", CONFIG.data.length);
-    console.log("Available columns:", CONFIG.columns);
-    if (CONFIG.data.length > 0) {
-        console.log("First row:", CONFIG.data[0]);
-        logRowDebugInfo(CONFIG.data[0], 0);
-        if (CONFIG.data.length > 1) logRowDebugInfo(CONFIG.data[1], 1);
-    }
+    // console.log("=== EXCEL DATA LOADED ===");
+    // console.log("Total rows:", CONFIG.data.length);
+    // console.log("Available columns:", CONFIG.columns);
+    // if (CONFIG.data.length > 0) {
+    //     console.log("First row:", CONFIG.data[0]);
+    //     logRowDebugInfo(CONFIG.data[0], 0);
+    //     if (CONFIG.data.length > 1) logRowDebugInfo(CONFIG.data[1], 1);
+    // }
 
     syncFromURL();
+
+    // Sync all filter select elements to reflect URL parameters
+    const statusFilterEl = document.getElementById("statusFilter");
+    const typeFilterEl = document.getElementById("typeFilter");
+    const siteFilterEl = document.getElementById("siteFilter");
+    const missingFilterEl = document.getElementById("missingFilter");
+
+    const urlParams = new URLSearchParams(window.location.search);
+    if (statusFilterEl) statusFilterEl.value = urlParams.get("status") || "";
+    if (typeFilterEl) typeFilterEl.value = urlParams.get("type") || "";
+    if (siteFilterEl) siteFilterEl.value = urlParams.get("site") || "";
+    if (missingFilterEl) missingFilterEl.value = urlParams.get("missing") || "";
 
     // wire inputs
     // rows per page control
@@ -928,9 +1187,32 @@ async function init({ rowsPerPage = 10 } = {}) {
         CONFIG.site = siteFilter.value;
         CONFIG.currentPage = 1;
         updateURL();
+        applyAll();
         renderTable();
         renderPagination();
     });
+
+    const customSiteInput =
+        document.getElementById("customSiteInput");
+
+    if (customSiteInput) {
+
+        customSiteInput.value =
+            SEARCH_SITES.custom.url;
+
+        customSiteInput.addEventListener("input", () => {
+
+            SEARCH_SITES.custom.url =
+                customSiteInput.value.trim();
+
+            localStorage.setItem(
+                "customSiteUrl",
+                SEARCH_SITES.custom.url
+            );
+
+            renderTable();
+        });
+    }
 
     const missingFilter = document.getElementById("missingFilter");
     if (missingFilter) missingFilter.addEventListener("change", () => {
@@ -951,10 +1233,14 @@ async function init({ rowsPerPage = 10 } = {}) {
 
     // initial render
     applyAll();
+
     renderTableHead();
     renderTable();
     renderPagination();
+
+    loadMissingEpisodesForVisibleCells();
 }
+
 
 window.CONFIG = CONFIG;
 window.init = init;
