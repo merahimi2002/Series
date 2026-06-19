@@ -1239,6 +1239,7 @@ async function init({ rowsPerPage = 10 } = {}) {
     renderPagination();
 
     loadMissingEpisodesForVisibleCells();
+    updateMissingProgressBar();
 }
 
 
