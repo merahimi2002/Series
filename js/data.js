@@ -35,6 +35,55 @@ const missingValuesMap =
         localStorage.getItem("missingValuesMap")
     ) || {};
 
+// =====================
+// TVMAZE INFO CACHE (Status-Tv, Show Type, Genres, Rating)
+// =====================
+// { "Series Title": { tvStatus, tvType, genres, rating, timestamp } }
+let tvInfoCache = JSON.parse(localStorage.getItem("tvInfoCache") || "{}");
+
+// Column name → tvmazeCache field mapping
+const TV_INFO_COL_MAP = {
+    "Status-Tv": "tvStatus",
+    "Show Type":  "tvType",
+    "Genres":     "genres",
+    "Rating":     "rating",
+};
+
+// Render one of the 4 TVMaze-info columns. Uses the shared tvmazeCache
+// (already populated by fetchTVMazeSeries) so no extra network calls needed.
+function renderTVMazeCell(row, col) {
+    const seriesTitle = getSeriesTitle(row);
+    const field = TV_INFO_COL_MAP[col];
+    const safeTitle = (seriesTitle || "").replace(/"/g, "&quot;");
+
+    if (!seriesTitle) return `<td class="tvinfo-cell" data-series="${safeTitle}" data-col="${col}">—</td>`;
+
+    // Try in-memory tvmazeCache (populated during missing-episode lookup)
+    const cached = tvmazeCache[seriesTitle];
+    if (cached && cached.data && cached.data[field] !== undefined) {
+        const val = cached.data[field] || "—";
+        return `<td class="tvinfo-cell" data-series="${safeTitle}" data-col="${col}">${val}</td>`;
+    }
+
+    return `<td class="tvinfo-cell" data-series="${safeTitle}" data-col="${col}"><span class="text-muted small">…</span></td>`;
+}
+
+// After each missing-episode resolution (which calls fetchTVMazeSeries),
+// push the new TVMaze info into any matching cells already on screen.
+function updateTVInfoCellsInDOM(seriesTitle) {
+    const cached = tvmazeCache[seriesTitle];
+    if (!cached || !cached.data) return;
+
+    for (const [col, field] of Object.entries(TV_INFO_COL_MAP)) {
+        const safeTitle = (seriesTitle || "").replace(/"/g, '\\"');
+        const cells = document.querySelectorAll(
+            `.tvinfo-cell[data-series="${safeTitle}"][data-col="${col}"]`
+        );
+        const val = cached.data[field] || "—";
+        cells.forEach(cell => { cell.textContent = val; });
+    }
+}
+
 const SEARCH_SITES = {
     digimoviez: {
         label: "DigiMoviez",
@@ -223,7 +272,11 @@ async function fetchTVMazeSeries(seriesTitle) {
 
         const result = {
             title: show.name,
-            seasons
+            seasons,
+            tvStatus: show.status || "",
+            tvType: show.type || "",
+            genres: Array.isArray(show.genres) ? show.genres.join(", ") : "",
+            rating: (show.rating && show.rating.average) ? String(show.rating.average) : "",
         };
 
         tvmazeCache[seriesTitle] = {
@@ -603,6 +656,10 @@ function applyAll() {
     const status = document.getElementById("statusFilter")?.value || "";
     const type = document.getElementById("typeFilter")?.value || "";
     const missing = document.getElementById("missingFilter")?.value || "";
+    const tvStatus = document.getElementById("tvStatusFilter")?.value || "";
+    const showType = document.getElementById("showTypeFilter")?.value || "";
+    const genres = document.getElementById("genresFilter")?.value || "";
+    const rating = document.getElementById("ratingFilter")?.value || "";
 
     CONFIG.filteredData = CONFIG.data.filter((item, index) => {
         const statusMatch = status ? item.Status === status : true;
@@ -629,7 +686,28 @@ function applyAll() {
             }
         }
 
-        return statusMatch && typeMatch && searchMatch && missingMatch;
+        // TVMaze info filters
+        let tvStatusMatch = true;
+        let showTypeMatch = true;
+        let genresMatch = true;
+        let ratingMatch = true;
+        if (tvStatus || showType || genres || rating) {
+            const seriesTitle = getSeriesTitle(item);
+            const cached = tvmazeCache[seriesTitle];
+            const tvData = (cached && cached.data) ? cached.data : null;
+
+            if (tvStatus) tvStatusMatch = tvData ? tvData.tvStatus === tvStatus : false;
+            if (showType) showTypeMatch = tvData ? tvData.tvType === showType : false;
+            if (genres) genresMatch = tvData ? (tvData.genres || "").toLowerCase().includes(genres.toLowerCase()) : false;
+            if (rating) {
+                const r = parseFloat(tvData ? tvData.rating : "");
+                const filterR = parseFloat(rating);
+                ratingMatch = !isNaN(r) && !isNaN(filterR) ? r >= filterR : false;
+            }
+        }
+
+        return statusMatch && typeMatch && searchMatch && missingMatch &&
+               tvStatusMatch && showTypeMatch && genresMatch && ratingMatch;
     });
 
     if (CONFIG.sortKey) applySort();
@@ -680,10 +758,30 @@ function renderTableHead() {
     const statusFilter = document.getElementById("statusFilter")?.value || "";
     const columnsToRender = [...CONFIG.columns];
 
-    // Missing always goes right after Type
-    if (!columnsToRender.includes("Missing")) {
+    // Status-Tv goes right after Status
+    if (!columnsToRender.includes("Status-Tv")) {
+        const statusIdx = columnsToRender.indexOf("Status");
+        columnsToRender.splice(statusIdx >= 0 ? statusIdx + 1 : columnsToRender.length, 0, "Status-Tv");
+    }
+
+    // Show Type goes right after Type, then Genres, then Rating
+    if (!columnsToRender.includes("Show Type")) {
         const typeIdx = columnsToRender.indexOf("Type");
-        columnsToRender.splice(typeIdx >= 0 ? typeIdx + 1 : columnsToRender.length, 0, "Missing");
+        columnsToRender.splice(typeIdx >= 0 ? typeIdx + 1 : columnsToRender.length, 0, "Show Type");
+    }
+    if (!columnsToRender.includes("Genres")) {
+        const showTypeIdx = columnsToRender.indexOf("Show Type");
+        columnsToRender.splice(showTypeIdx >= 0 ? showTypeIdx + 1 : columnsToRender.length, 0, "Genres");
+    }
+    if (!columnsToRender.includes("Rating")) {
+        const genresIdx = columnsToRender.indexOf("Genres");
+        columnsToRender.splice(genresIdx >= 0 ? genresIdx + 1 : columnsToRender.length, 0, "Rating");
+    }
+
+    // Missing always goes right after Rating
+    if (!columnsToRender.includes("Missing")) {
+        const ratingIdx = columnsToRender.indexOf("Rating");
+        columnsToRender.splice(ratingIdx >= 0 ? ratingIdx + 1 : columnsToRender.length, 0, "Missing");
     }
 
     if (statusFilter === "Download") {
@@ -849,10 +947,30 @@ function renderTable() {
     const statusFilter = document.getElementById("statusFilter")?.value || "";
     const columnsToRender = [...CONFIG.columns];
 
-    // Missing always goes right after Type
-    if (!columnsToRender.includes("Missing")) {
+    // Status-Tv goes right after Status
+    if (!columnsToRender.includes("Status-Tv")) {
+        const statusIdx = columnsToRender.indexOf("Status");
+        columnsToRender.splice(statusIdx >= 0 ? statusIdx + 1 : columnsToRender.length, 0, "Status-Tv");
+    }
+
+    // Show Type goes right after Type, then Genres, then Rating
+    if (!columnsToRender.includes("Show Type")) {
         const typeIdx = columnsToRender.indexOf("Type");
-        columnsToRender.splice(typeIdx >= 0 ? typeIdx + 1 : columnsToRender.length, 0, "Missing");
+        columnsToRender.splice(typeIdx >= 0 ? typeIdx + 1 : columnsToRender.length, 0, "Show Type");
+    }
+    if (!columnsToRender.includes("Genres")) {
+        const showTypeIdx = columnsToRender.indexOf("Show Type");
+        columnsToRender.splice(showTypeIdx >= 0 ? showTypeIdx + 1 : columnsToRender.length, 0, "Genres");
+    }
+    if (!columnsToRender.includes("Rating")) {
+        const genresIdx = columnsToRender.indexOf("Genres");
+        columnsToRender.splice(genresIdx >= 0 ? genresIdx + 1 : columnsToRender.length, 0, "Rating");
+    }
+
+    // Missing always goes right after Rating
+    if (!columnsToRender.includes("Missing")) {
+        const ratingIdx = columnsToRender.indexOf("Rating");
+        columnsToRender.splice(ratingIdx >= 0 ? ratingIdx + 1 : columnsToRender.length, 0, "Missing");
     }
 
     if (statusFilter === "Download") {
@@ -874,6 +992,9 @@ function renderTable() {
                     }
                     if (col === "Missing") {
                         return renderMissingCell(row);
+                    }
+                    if (col === "Status-Tv" || col === "Show Type" || col === "Genres" || col === "Rating") {
+                        return renderTVMazeCell(row, col);
                     }
                     return `<td>${row[col] || ""}</td>`;
                 })
@@ -1036,6 +1157,7 @@ async function resolveMissingForRow(row) {
     } finally {
         missingFetchInFlight.delete(seriesTitle);
         updateMissingCellInDOM(seriesTitle, missingValuesMap[seriesTitle]);
+        updateTVInfoCellsInDOM(seriesTitle);
         logMissingLoaderProgress();
     }
 }
@@ -1183,6 +1305,10 @@ function clearFilters() {
     const missingEl = document.getElementById("missingFilter");
     const searchEl = document.getElementById("searchInput");
     const rowsSelect = document.getElementById("rowsPerPageSelect");
+    const tvStatusEl = document.getElementById("tvStatusFilter");
+    const showTypeEl = document.getElementById("showTypeFilter");
+    const genresEl = document.getElementById("genresFilter");
+    const ratingEl = document.getElementById("ratingFilter");
 
     if (statusEl) statusEl.value = "";
     if (typeEl) typeEl.value = "";
@@ -1198,6 +1324,10 @@ function clearFilters() {
         searchEl.value = "";
         CONFIG.search = "";
     }
+    if (tvStatusEl) tvStatusEl.value = "";
+    if (showTypeEl) showTypeEl.value = "";
+    if (genresEl) genresEl.value = "";
+    if (ratingEl) ratingEl.value = "";
 
     // reset to first page
     CONFIG.currentPage = 1;
@@ -1376,6 +1506,17 @@ async function init({ rowsPerPage = 10 } = {}) {
         applyAll();
         renderTable();
         renderPagination();
+    });
+
+    // TVMaze info filters
+    ["tvStatusFilter", "showTypeFilter", "genresFilter", "ratingFilter"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener("change", () => {
+            CONFIG.currentPage = 1;
+            applyAll();
+            renderTable();
+            renderPagination();
+        });
     });
 
     const clearBtn = document.getElementById("clearFiltersBtn");
