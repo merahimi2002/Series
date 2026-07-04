@@ -1,14 +1,22 @@
-document.addEventListener("DOMContentLoaded", function () {
+document.addEventListener("DOMContentLoaded", async function () {
     const params = new URLSearchParams(window.location.search);
-    const id = params.get("id");
+    const idStr = params.get("id");
+    const id = parseInt(idStr, 10);
 
-    if (!id) {
+    if (isNaN(id)) {
         document.getElementById("seriesTitle").textContent = "Error";
         document.getElementById("seriesSummary").innerHTML = "<p class='text-center'>No item ID provided.</p>";
         return;
     }
 
-    const cachedData = JSON.parse(localStorage.getItem("excelCache") || "[]");
+    const cachedData = await db.getItem("excelCache") || [];
+    
+    if (!Array.isArray(cachedData)) {
+        document.getElementById("seriesTitle").textContent = "Error";
+        document.getElementById("seriesSummary").innerHTML = "<p class='text-center'>Database error: Cache is not an array.</p>";
+        return;
+    }
+
     const item = cachedData[id];
 
     if (!item) {
@@ -20,7 +28,7 @@ document.addEventListener("DOMContentLoaded", function () {
     const seriesTitle = item["Serial Name"] || item["title"] || item["Name"] || "";
     document.getElementById("seriesTitle").textContent = seriesTitle || "Unknown Series";
 
-    const tvmazeCache = JSON.parse(localStorage.getItem("tvmazeCache") || "{}");
+    const tvmazeCache = await db.getItem("tvmazeCache") || {};
     const apiResponse = tvmazeCache[seriesTitle];
 
     const safe = (val, fallback = "N/A") => (val !== null && val !== undefined && val !== "" ? val : fallback);
@@ -35,9 +43,18 @@ document.addEventListener("DOMContentLoaded", function () {
         `;
     };
 
-    if (apiResponse && apiResponse.data && apiResponse.data.length > 0) {
-        const apiData = apiResponse.data[0].show;
+    let apiData = null;
+    if (apiResponse) {
+        if (apiResponse.data && apiResponse.data.show) {
+            apiData = apiResponse.data.show;
+        } else if (apiResponse.show) {
+            apiData = apiResponse.show;
+        } else if (apiResponse.type || apiResponse.name) {
+            apiData = apiResponse;
+        }
+    }
 
+    if (apiData) {
         // 1. Hero Section
         const posterUrl = apiData.image?.medium || apiData.image?.original || "";
         document.getElementById("seriesPoster").src = posterUrl || "Image/logo.png";
@@ -50,7 +67,10 @@ document.addEventListener("DOMContentLoaded", function () {
             <span class="badge bg-info text-dark">${safe(apiData.status)}</span>
         `;
 
-        document.getElementById("seriesRating").textContent = safe(apiData.rating?.average, "N/A");
+        const ratingVal = apiData.rating?.average;
+        document.getElementById("seriesRating").innerHTML = ratingVal 
+            ? `<i class="bi bi-star-fill me-1"></i>${ratingVal}/10` 
+            : "N/A";
         document.getElementById("seriesPremiered").textContent = safe(apiData.premiered);
         document.getElementById("seriesRuntime").textContent = apiData.runtime ? `${apiData.runtime} min` : "N/A";
 

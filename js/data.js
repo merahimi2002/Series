@@ -4,7 +4,7 @@
 // =====================
 // CACHE
 // =====================
-let excelCache = JSON.parse(localStorage.getItem("excelCache"));
+let excelCache = null;
 
 // =====================
 // APP STATE
@@ -30,21 +30,18 @@ const CONFIG = {
 };
 
 // Store missing values for each row: { rowIndex: "Complete" | "Has Missing" | "N/A" | "Error" }
-const missingValuesMap =
-    JSON.parse(
-        localStorage.getItem("missingValuesMap")
-    ) || {};
+let missingValuesMap = {};
 
 // =====================
 // TVMAZE INFO CACHE (Status Tv, Show Type, Genres, Rating)
 // =====================
 // { "Series Title": { tvStatus, tvType, genres, rating, timestamp } }
-let tvInfoCache = JSON.parse(localStorage.getItem("tvInfoCache") || "{}");
+let tvInfoCache = {};
 
 // Column name → tvmazeCache field mapping
 const TV_INFO_COL_MAP = {
-    "Status Tv": "tvStatus",
-    "Show Type":  "tvType",
+    "Status Tv": "status",
+    "Show Type":  "type",
     "Genres":     "genres",
     "Rating":     "rating",
 };
@@ -116,9 +113,13 @@ function renderTVMazeCell(row, col) {
 
     // Try in-memory tvmazeCache (populated during missing-episode lookup)
     const cached = tvmazeCache[seriesTitle];
-    if (cached && cached.data && cached.data[field] !== undefined) {
-        const val = cached.data[field] || "—";
-        
+    const showData = cached?.data?.show;
+    if (showData && showData[field] !== undefined) {
+        // "rating" in TVMaze is an object like { average: 8.4 }, not a scalar —
+        // pull out .average so we don't render "[object Object]".
+        const rawVal = col === "Rating" ? showData.rating?.average : showData[field];
+        const val = (rawVal !== null && rawVal !== undefined && rawVal !== "") ? rawVal : "—";
+
         if (col === "Rating" && val !== "—") {
             return `<td class="tvinfo-cell" data-series="${safeTitle}" data-col="${col}">
                 <span class="badge rounded-pill bg-warning">
@@ -144,7 +145,9 @@ function updateTVInfoCellsInDOM(seriesTitle) {
         const cells = document.querySelectorAll(
             `.tvinfo-cell[data-series="${safeTitle}"][data-col="${col}"]`
         );
-        const val = cached.data[field] || "—";
+        // "rating" is an object ({ average }) in the TVMaze payload, not a scalar.
+        const rawVal = col === "Rating" ? cached.data.show.rating?.average : cached.data.show[field];
+        const val = (rawVal !== null && rawVal !== undefined && rawVal !== "") ? rawVal : "—";
         cells.forEach(cell => { cell.textContent = val; });
     }
 }
@@ -360,12 +363,8 @@ async function fetchTVMazeSeries(seriesTitle) {
         });
 
         const result = {
-            title: show.name,
-            seasons,
-            tvStatus: show.status || "",
-            tvType: show.type || "",
-            genres: Array.isArray(show.genres) ? show.genres.join(", ") : "",
-            rating: (show.rating && show.rating.average) ? String(show.rating.average) : "",
+            show: show,
+            seasons: seasons,
         };
 
         tvmazeCache[seriesTitle] = {
@@ -373,16 +372,44 @@ async function fetchTVMazeSeries(seriesTitle) {
             timestamp: Date.now()
         };
 
-        localStorage.setItem(
-            "tvmazeCache",
-            JSON.stringify(tvmazeCache)
-        );
+        await db.setItem("tvmazeCache", tvmazeCache);
 
         return result;
 
     } catch (err) {
         console.error(err);
         return null;
+    }
+}
+
+// Helper to determine Status Diff label and class
+function calculateStatusDiff(row, tvData) {
+    const excelStatus = getRowStatus(row);
+
+    // "Download" rows are always considered Complete, regardless of TVMaze status.
+    if (excelStatus === "download") {
+        return { label: "Complete", cls: "text-bg-success" };
+    }
+
+    if (!tvData) return { label: "n/a", cls: "text-bg-info" };
+
+    const tvStatus = tvData.show?.status || "";
+
+    if (excelStatus === "finished") {
+        return tvStatus === "Ended"
+            ? { label: "Complete", cls: "text-bg-success" }
+            : { label: "Attention", cls: "text-bg-danger" };
+    } else if (excelStatus === "on going") {
+        // NOTE: the actual dropdown value is "On Going" (with a space), which
+        // getRowStatus() lowercases to "on going" — not "ongoing". The old
+        // comparison here used "ongoing" (no space) and never matched, so
+        // every "On Going" row (and therefore any TVMaze status under it,
+        // including "To Be Determined") fell through to the n/a branch below.
+        return tvStatus === "Ended"
+            ? { label: "Attention", cls: "text-bg-danger" }
+            : { label: "Complete", cls: "text-bg-success" };
+    } else {
+        return { label: "n/a", cls: "text-bg-info" };
     }
 }
 
@@ -587,7 +614,7 @@ async function loadExcelOnce() {
                 const jsonData = await parseWorkbookBuffer(arrayBuffer);
                 const normalized = normalizeCachedData(jsonData);
                 excelCache = normalized;
-                localStorage.setItem("excelCache", JSON.stringify(normalized));
+                await db.setItem("excelCache", normalized);
                 console.log(`Successfully loaded Excel from ${path}`);
                 return normalized;
             } catch (err) {
@@ -602,8 +629,8 @@ async function loadExcelOnce() {
     return [];
 }
 
-function getExcelFromStorage() {
-    return JSON.parse(localStorage.getItem("excelCache") || "[]");
+async function getExcelFromStorage() {
+    return await db.getItem("excelCache") || [];
 }
 
 function normalizeHeaders(rawHeaders) {
@@ -751,27 +778,17 @@ function applyAll() {
             const cached = tvmazeCache[seriesTitle];
             const tvData = (cached && cached.data) ? cached.data : null;
 
-            if (tvStatus) tvStatusMatch = tvData ? tvData.tvStatus === tvStatus : false;
-            if (showType) showTypeMatch = tvData ? tvData.tvType === showType : false;
-            if (genres) genresMatch = tvData ? (tvData.genres || "").toLowerCase().includes(genres.toLowerCase()) : false;
+            if (tvStatus) tvStatusMatch = tvData ? tvData.show?.status === tvStatus : false;
+            if (showType) showTypeMatch = tvData ? tvData.show?.type === showType : false;
+            if (genres) genresMatch = tvData ? (tvData.show?.genres || "").toLowerCase().includes(genres.toLowerCase()) : false;
             if (rating) {
-                const r = parseFloat(tvData ? tvData.rating : "");
+                const r = parseFloat(tvData ? tvData.show?.rating?.average : "");
                 const filterR = parseFloat(rating);
                 ratingMatch = !isNaN(r) && !isNaN(filterR) ? r >= filterR : false;
             }
             if (typeDiff) {
-                if (!tvData) {
-                    typeDiffMatch = typeDiff === "n/a";
-                } else {
-                    const status = tvData.tvStatus || "";
-                    const type = tvData.tvType || "";
-                    const cachedEntry = missingValuesMap[seriesTitle];
-                    const rowMissingValue = cachedEntry ? (typeof cachedEntry === "string" ? cachedEntry : cachedEntry.status) : "";
-                    const isComplete = (status === "Finished" || status === "Ended" || type === "Ended") || rowMissingValue === "Complete";
-                    if (typeDiff === "Complete") typeDiffMatch = isComplete;
-                    else if (typeDiff === "Attention") typeDiffMatch = !isComplete;
-                    else if (typeDiff === "n/a") typeDiffMatch = false;
-                }
+                const diff = calculateStatusDiff(item, tvData);
+                typeDiffMatch = diff.label === typeDiff;
             }
         }
 
@@ -984,32 +1001,12 @@ function renderStatusDiffCell(row) {
     const cached = tvmazeCache[seriesTitle];
     const tvData = (cached && cached.data) ? cached.data : null;
 
-    if (!tvData) {
-        return `<td class="status-diff-cell" data-series="${seriesTitle.replace(/"/g, '"')}">
-            <span class="badge rounded-pill text-bg-info">n/a</span>
-        </td>`;
-    }
-
-    const excelStatus = getRowStatus(row);
-    const tvStatus = tvData.tvStatus || "";
-
-    let result = { label: "Complete", cls: "text-bg-success" };
-
-    if (excelStatus === "finished") {
-        if (tvStatus === "Ended") {
-            result = { label: "Complete", cls: "text-bg-success" };
-        } else {
-            result = { label: "Attention", cls: "text-bg-danger" };
-        }
-    } else if (excelStatus === "ongoing") {
-        if (tvStatus === "Ended") {
-            result = { label: "Attention", cls: "text-bg-danger" };
-        } else {
-            result = { label: "Complete", cls: "text-bg-success" };
-        }
-    } else if (excelStatus === "") {
-        result = { label: "n/a", cls: "text-bg-info" };
-    }
+    // Use the exact same function the "Status Diff" filter uses (calculateStatusDiff)
+    // so the badge shown here always matches what the filter matches against.
+    // Previously this had its own duplicated logic that disagreed with
+    // calculateStatusDiff for any status other than "finished"/"ongoing"/"",
+    // e.g. rows with status "download" showed "Complete" but were filtered as "n/a".
+    const result = calculateStatusDiff(row, tvData);
 
     return `<td class="status-diff-cell" data-series="${seriesTitle.replace(/"/g, '"')}">
         <span class="badge rounded-pill ${result.cls}">${result.label}</span>
@@ -1228,10 +1225,7 @@ async function processRowsWithConcurrency(rows, concurrency = 10) {
     const workerCount = Math.max(1, Math.min(concurrency, rows.length));
     await Promise.all(Array.from({ length: workerCount }, worker));
 
-    localStorage.setItem(
-        "missingValuesMap",
-        JSON.stringify(missingValuesMap)
-    );
+    await db.setItem("missingValuesMap", missingValuesMap);
 }
 
 // Load missing episodes: the rows on the *current page* are resolved first
@@ -1348,11 +1342,11 @@ function changePage(page) {
 // =====================
 // CLEAR FILTERS
 // =====================
-function clearCache() {
-    const customSiteUrl = localStorage.getItem("customSiteUrl");
-    localStorage.clear();
+async function clearCache() {
+    const customSiteUrl = await db.getItem("customSiteUrl");
+    await db.clear();
     if (customSiteUrl) {
-        localStorage.setItem("customSiteUrl", customSiteUrl);
+        await db.setItem("customSiteUrl", customSiteUrl);
     }
     location.reload();
 }
@@ -1412,29 +1406,29 @@ function clearFilters() {
 let searchTimeout;
 
 async function init({ rowsPerPage = 10 } = {}) {
+    // 1. Migrate from localStorage to IndexedDB
+    await db.migrate();
+
     CONFIG.rowsPerPage = rowsPerPage;
 
     CONFIG.tableBody = document.getElementById("tableBody");
     CONFIG.tableHead = document.getElementById("tableHead");
     CONFIG.pagination = document.getElementById("pagination");
 
-    // Load TVMaze cache from localStorage
-    tvmazeCache = JSON.parse(
-        localStorage.getItem("tvmazeCache")
-    ) || {};
+    // 2. Load caches from IndexedDB
+    excelCache = await db.getItem("excelCache");
+    missingValuesMap = await db.getItem("missingValuesMap") || {};
+    tvInfoCache = await db.getItem("tvInfoCache") || {};
+    tvmazeCache = await db.getItem("tvmazeCache") || {};
+    SEARCH_SITES.custom.url = await db.getItem("customSiteUrl") || "";
 
     // Clear old missingValuesMap cache if it contains plain strings (pre-reasons format).
-    // This forces a fresh lookup so reasons get populated correctly.
-    const rawMissingCache = JSON.parse(localStorage.getItem("missingValuesMap") || "{}");
-    const hasOldFormat = Object.values(rawMissingCache).some(v => typeof v === "string");
+    const hasOldFormat = Object.values(missingValuesMap).some(v => typeof v === "string");
     if (hasOldFormat) {
         console.log("[Missing] Old string-format cache detected — clearing to rebuild with reasons.");
-        localStorage.removeItem("missingValuesMap");
-        Object.keys(missingValuesMap).forEach(k => delete missingValuesMap[k]);
+        await db.removeItem("missingValuesMap");
+        missingValuesMap = {};
     }
-
-    SEARCH_SITES.custom.url =
-        localStorage.getItem("customSiteUrl") || "";
 
     // Load Excel and get normalized data directly
     const loadedData = await loadExcelOnce();
@@ -1538,12 +1532,12 @@ async function init({ rowsPerPage = 10 } = {}) {
         customSiteInput.value =
             SEARCH_SITES.custom.url;
 
-        customSiteInput.addEventListener("input", () => {
+        customSiteInput.addEventListener("input", async () => {
 
             SEARCH_SITES.custom.url =
                 customSiteInput.value.trim();
 
-            localStorage.setItem(
+            await db.setItem(
                 "customSiteUrl",
                 SEARCH_SITES.custom.url
             );
