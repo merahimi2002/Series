@@ -36,25 +36,81 @@ const missingValuesMap =
     ) || {};
 
 // =====================
-// TVMAZE INFO CACHE (Status-Tv, Show Type, Genres, Rating)
+// TVMAZE INFO CACHE (Status Tv, Show Type, Genres, Rating)
 // =====================
 // { "Series Title": { tvStatus, tvType, genres, rating, timestamp } }
 let tvInfoCache = JSON.parse(localStorage.getItem("tvInfoCache") || "{}");
 
 // Column name → tvmazeCache field mapping
 const TV_INFO_COL_MAP = {
-    "Status-Tv": "tvStatus",
+    "Status Tv": "tvStatus",
     "Show Type":  "tvType",
     "Genres":     "genres",
     "Rating":     "rating",
 };
+
+// Helper to determine which columns to render and in what order
+function getColumnsToRender() {
+    const statusFilter = document.getElementById("statusFilter")?.value || "";
+    const columnsToRender = [...CONFIG.columns];
+
+    // Status Tv goes right after Status
+    if (!columnsToRender.includes("Status Tv")) {
+        const statusIdx = columnsToRender.indexOf("Status");
+        columnsToRender.splice(statusIdx >= 0 ? statusIdx + 1 : columnsToRender.length, 0, "Status Tv");
+    }
+
+    // Show Type goes right after Type, then Genres, then Rating
+    if (!columnsToRender.includes("Show Type")) {
+        const typeIdx = columnsToRender.indexOf("Type");
+        columnsToRender.splice(typeIdx >= 0 ? typeIdx + 1 : columnsToRender.length, 0, "Show Type");
+    }
+    if (!columnsToRender.includes("Genres")) {
+        const showTypeIdx = columnsToRender.indexOf("Show Type");
+        columnsToRender.splice(showTypeIdx >= 0 ? showTypeIdx + 1 : columnsToRender.length, 0, "Genres");
+    }
+    if (!columnsToRender.includes("Rating")) {
+        const genresIdx = columnsToRender.indexOf("Genres");
+        columnsToRender.splice(genresIdx >= 0 ? genresIdx + 1 : columnsToRender.length, 0, "Rating");
+    }
+
+    // Missing always goes right after Rating
+    if (!columnsToRender.includes("Missing")) {
+        const ratingIdx = columnsToRender.indexOf("Rating");
+        columnsToRender.splice(ratingIdx >= 0 ? ratingIdx + 1 : columnsToRender.length, 0, "Missing");
+    }
+
+    // Status Diff goes right after Missing
+    if (!columnsToRender.includes("Status Diff")) {
+        const missingIdx = columnsToRender.indexOf("Missing");
+        columnsToRender.splice(missingIdx >= 0 ? missingIdx + 1 : columnsToRender.length, 0, "Status Diff");
+    }
+
+    // Read more always goes right after Status Diff (or Missing if Status Diff is missing)
+    if (!columnsToRender.includes("Read more")) {
+        const diffIdx = columnsToRender.indexOf("Status Diff");
+        const missingIdx = columnsToRender.indexOf("Missing");
+        const insertIdx = diffIdx >= 0 ? diffIdx + 1 : (missingIdx >= 0 ? missingIdx + 1 : columnsToRender.length);
+        columnsToRender.splice(insertIdx, 0, "Read more");
+    }
+
+    if (statusFilter === "Download") {
+        const typeIndex = columnsToRender.indexOf("Type");
+        if (typeIndex >= 0 && !columnsToRender.includes("Download")) {
+            columnsToRender.splice(typeIndex + 1, 0, "Download");
+        } else if (!columnsToRender.includes("Download")) {
+            columnsToRender.push("Download");
+        }
+    }
+    return columnsToRender;
+}
 
 // Render one of the 4 TVMaze-info columns. Uses the shared tvmazeCache
 // (already populated by fetchTVMazeSeries) so no extra network calls needed.
 function renderTVMazeCell(row, col) {
     const seriesTitle = getSeriesTitle(row);
     const field = TV_INFO_COL_MAP[col];
-    const safeTitle = (seriesTitle || "").replace(/"/g, "&quot;");
+    const safeTitle = (seriesTitle || "").replace(/"/g, "");
 
     if (!seriesTitle) return `<td class="tvinfo-cell" data-series="${safeTitle}" data-col="${col}">—</td>`;
 
@@ -62,6 +118,15 @@ function renderTVMazeCell(row, col) {
     const cached = tvmazeCache[seriesTitle];
     if (cached && cached.data && cached.data[field] !== undefined) {
         const val = cached.data[field] || "—";
+        
+        if (col === "Rating" && val !== "—") {
+            return `<td class="tvinfo-cell" data-series="${safeTitle}" data-col="${col}">
+                <span class="badge rounded-pill bg-warning">
+                    <i class="bi bi-star me-1"></i>${val}
+                </span>
+            </td>`;
+        }
+        
         return `<td class="tvinfo-cell" data-series="${safeTitle}" data-col="${col}">${val}</td>`;
     }
 
@@ -187,17 +252,21 @@ function parseEpisodes(episodesStr) {
 // =====================
 
 // Minimum time between any two outgoing TVMaze requests, system-wide.
-// TVMaze's own guidance is "wait 0.5s between requests and you'll never
-// hit the limit" -- that's exactly what this enforces, regardless of how
-// many rows are being processed "concurrently" on our side.
-const TVMAZE_REQUEST_INTERVAL_MS = 500;
+// TVMaze allows ~20 calls per 10 seconds. 300ms is slightly more aggressive
+// but the exponential backoff handles 429s.
+const TVMAZE_REQUEST_INTERVAL_MS = 300;
 let nextAllowedRequestTime = 0;
 
 function waitForRateLimitSlot() {
     return new Promise(resolve => {
         const now = Date.now();
+        // If we are already past the next allowed time, we can go immediately.
+        // Otherwise, we wait for the difference.
         const wait = Math.max(0, nextAllowedRequestTime - now);
+        
+        // Schedule the next slot immediately to maintain the cadence
         nextAllowedRequestTime = Math.max(now, nextAllowedRequestTime) + TVMAZE_REQUEST_INTERVAL_MS;
+        
         setTimeout(resolve, wait);
     });
 }
@@ -208,22 +277,42 @@ async function fetchTVMazeDirect(targetUrl, retries = 4) {
     for (let attempt = 0; attempt <= retries; attempt++) {
         await waitForRateLimitSlot();
 
-        const response = await fetch(targetUrl);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
 
-        if (response.status === 429) {
-            const backoffMs = 1000 * Math.pow(2, attempt); // 1s, 2s, 4s, 8s, 16s
-            await new Promise(r => setTimeout(r, backoffMs));
-            continue;
+        try {
+            const response = await fetch(targetUrl, { signal: controller.signal });
+            clearTimeout(timeoutId);
+
+            if (response.status === 429) {
+                const backoffMs = 1000 * Math.pow(2, attempt); // 1s, 2s, 4s, 8s, 16s
+                await new Promise(r => setTimeout(r, backoffMs));
+                continue;
+            }
+
+            if (!response.ok) {
+                throw new Error(`TVMaze request failed: ${response.status}`);
+            }
+
+            return await response.json();
+        } catch (err) {
+            clearTimeout(timeoutId);
+            
+            // Retry on network errors or timeouts
+            if (attempt < retries) {
+                const backoffMs = 1000 * Math.pow(2, attempt);
+                const errorMsg = err.name === 'AbortError' 
+                    ? 'Request timed out' 
+                    : `Network error: ${err.message}`;
+                console.warn(`TVMaze ${errorMsg}. Retrying in ${backoffMs}ms...`);
+                await new Promise(r => setTimeout(r, backoffMs));
+                continue;
+            }
+            throw err;
         }
-
-        if (!response.ok) {
-            throw new Error(`TVMaze request failed: ${response.status}`);
-        }
-
-        return response.json();
     }
 
-    throw new Error("TVMaze: still rate-limited after retries");
+    throw new Error("TVMaze: maximum retries reached");
 }
 
 // Fetch series info from TVMaze
@@ -474,30 +563,6 @@ async function parseWorkbookBuffer(arrayBuffer) {
     });
 }
 
-async function loadExcelFromFile(file) {
-    const arrayBuffer = await file.arrayBuffer();
-    return parseWorkbookBuffer(arrayBuffer);
-}
-
-function waitForFileSelection() {
-    return new Promise((resolve, reject) => {
-        const input = document.getElementById('excelFileInput');
-        if (!input) {
-            return reject(new Error('File input not available.'));
-        }
-
-        const handler = () => {
-            const file = input.files?.[0];
-            if (file) {
-                input.removeEventListener('change', handler);
-                resolve(file);
-            }
-        };
-
-        input.addEventListener('change', handler);
-    });
-}
-
 async function loadExcelOnce() {
     if (Array.isArray(excelCache) && excelCache.length > 0) {
         excelCache = normalizeCachedData(excelCache);
@@ -510,39 +575,27 @@ async function loadExcelOnce() {
         return excelCache;
     }
 
-    // Try automatic fetch first (works on both HTTP and file:// in some cases)
-    const paths = ["./db/Data.xlsx", "db/Data.xlsx", "./db/data.xlsx", "db/data.xlsx"];
-    for (const path of paths) {
-        try {
-            const response = await fetch(path);
-            if (!response.ok) throw new Error(`Failed to load ${path} (${response.status})`);
-            const arrayBuffer = await response.arrayBuffer();
-            const jsonData = await parseWorkbookBuffer(arrayBuffer);
-            const normalized = normalizeCachedData(jsonData);
-            excelCache = normalized;
-            localStorage.setItem("excelCache", JSON.stringify(normalized));
-            console.log(`Successfully loaded Excel from ${path}`);
-            return normalized;
-        } catch (err) {
-            console.warn(`Unable to load Excel from ${path}:`, err);
+    // Try automatic fetch first. 
+    // Note: fetch() is blocked by CORS policy when using the file:// protocol.
+    if (location.protocol !== 'file:') {
+        const paths = ["./db/Data.xlsx", "db/Data.xlsx", "./db/data.xlsx", "db/data.xlsx"];
+        for (const path of paths) {
+            try {
+                const response = await fetch(path);
+                if (!response.ok) throw new Error(`Failed to load ${path} (${response.status})`);
+                const arrayBuffer = await response.arrayBuffer();
+                const jsonData = await parseWorkbookBuffer(arrayBuffer);
+                const normalized = normalizeCachedData(jsonData);
+                excelCache = normalized;
+                localStorage.setItem("excelCache", JSON.stringify(normalized));
+                console.log(`Successfully loaded Excel from ${path}`);
+                return normalized;
+            } catch (err) {
+                console.warn(`Unable to load Excel from ${path}:`, err);
+            }
         }
-    }
-
-    // If automatic fetch failed and we're on file://, wait for user to select file
-    if (location.protocol === 'file:') {
-        console.log("Automatic Excel loading failed. Waiting for manual file selection...");
-        try {
-            const file = await waitForFileSelection();
-            const jsonData = await loadExcelFromFile(file);
-            const normalized = normalizeCachedData(jsonData);
-            excelCache = normalized;
-            localStorage.setItem("excelCache", JSON.stringify(normalized));
-            console.log("Successfully loaded Excel from user file selection");
-            return normalized;
-        } catch (err) {
-            console.error("Failed to load Excel from file input:", err);
-            return [];
-        }
+    } else {
+        console.log("Running on file:// protocol. Automatic fetch is disabled due to browser CORS policy.");
     }
 
     console.error("Unable to automatically load local Excel data. Verify that ./db/Data.xlsx exists.");
@@ -655,6 +708,7 @@ function updateURL() {
 function applyAll() {
     const status = document.getElementById("statusFilter")?.value || "";
     const type = document.getElementById("typeFilter")?.value || "";
+    const typeDiff = document.getElementById("typeDiffFilter")?.value || "";
     const missing = document.getElementById("missingFilter")?.value || "";
     const tvStatus = document.getElementById("tvStatusFilter")?.value || "";
     const showType = document.getElementById("showTypeFilter")?.value || "";
@@ -691,7 +745,8 @@ function applyAll() {
         let showTypeMatch = true;
         let genresMatch = true;
         let ratingMatch = true;
-        if (tvStatus || showType || genres || rating) {
+        let typeDiffMatch = true;
+        if (tvStatus || showType || genres || rating || typeDiff) {
             const seriesTitle = getSeriesTitle(item);
             const cached = tvmazeCache[seriesTitle];
             const tvData = (cached && cached.data) ? cached.data : null;
@@ -704,10 +759,24 @@ function applyAll() {
                 const filterR = parseFloat(rating);
                 ratingMatch = !isNaN(r) && !isNaN(filterR) ? r >= filterR : false;
             }
+            if (typeDiff) {
+                if (!tvData) {
+                    typeDiffMatch = typeDiff === "n/a";
+                } else {
+                    const status = tvData.tvStatus || "";
+                    const type = tvData.tvType || "";
+                    const cachedEntry = missingValuesMap[seriesTitle];
+                    const rowMissingValue = cachedEntry ? (typeof cachedEntry === "string" ? cachedEntry : cachedEntry.status) : "";
+                    const isComplete = (status === "Finished" || status === "Ended" || type === "Ended") || rowMissingValue === "Complete";
+                    if (typeDiff === "Complete") typeDiffMatch = isComplete;
+                    else if (typeDiff === "Attention") typeDiffMatch = !isComplete;
+                    else if (typeDiff === "n/a") typeDiffMatch = false;
+                }
+            }
         }
 
         return statusMatch && typeMatch && searchMatch && missingMatch &&
-               tvStatusMatch && showTypeMatch && genresMatch && ratingMatch;
+               tvStatusMatch && showTypeMatch && genresMatch && ratingMatch && typeDiffMatch;
     });
 
     if (CONFIG.sortKey) applySort();
@@ -741,57 +810,25 @@ function toggleSort(key) {
     CONFIG.currentPage = 1;
 
     applySort();
-    renderTableHead();
-    renderTable();
-    renderPagination();
+    refreshUI();
 }
 
 // =====================
 // TABLE RENDER
 // =====================
+function refreshUI() {
+    applyAll();
+    renderTableHead();
+    renderTable();
+    renderPagination();
+}
+
 function renderTableHead() {
     const headRow = CONFIG.tableHead;
     if (!headRow) return;
 
     headRow.innerHTML = "";
-
-    const statusFilter = document.getElementById("statusFilter")?.value || "";
-    const columnsToRender = [...CONFIG.columns];
-
-    // Status-Tv goes right after Status
-    if (!columnsToRender.includes("Status-Tv")) {
-        const statusIdx = columnsToRender.indexOf("Status");
-        columnsToRender.splice(statusIdx >= 0 ? statusIdx + 1 : columnsToRender.length, 0, "Status-Tv");
-    }
-
-    // Show Type goes right after Type, then Genres, then Rating
-    if (!columnsToRender.includes("Show Type")) {
-        const typeIdx = columnsToRender.indexOf("Type");
-        columnsToRender.splice(typeIdx >= 0 ? typeIdx + 1 : columnsToRender.length, 0, "Show Type");
-    }
-    if (!columnsToRender.includes("Genres")) {
-        const showTypeIdx = columnsToRender.indexOf("Show Type");
-        columnsToRender.splice(showTypeIdx >= 0 ? showTypeIdx + 1 : columnsToRender.length, 0, "Genres");
-    }
-    if (!columnsToRender.includes("Rating")) {
-        const genresIdx = columnsToRender.indexOf("Genres");
-        columnsToRender.splice(genresIdx >= 0 ? genresIdx + 1 : columnsToRender.length, 0, "Rating");
-    }
-
-    // Missing always goes right after Rating
-    if (!columnsToRender.includes("Missing")) {
-        const ratingIdx = columnsToRender.indexOf("Rating");
-        columnsToRender.splice(ratingIdx >= 0 ? ratingIdx + 1 : columnsToRender.length, 0, "Missing");
-    }
-
-    if (statusFilter === "Download") {
-        const typeIndex = columnsToRender.indexOf("Type");
-        if (typeIndex >= 0 && !columnsToRender.includes("Download")) {
-            columnsToRender.splice(typeIndex + 1, 0, "Download");
-        } else if (!columnsToRender.includes("Download")) {
-            columnsToRender.push("Download");
-        }
-    }
+    const columnsToRender = getColumnsToRender();
 
     columnsToRender.forEach(col => {
         const th = document.createElement("th");
@@ -893,7 +930,7 @@ function missingBadgeHTML(entry, row) {
          data-bs-title="${tooltipText.replace(/\|/g, "<br>")}"
         data-bs-content="${popoverContent.replace(/"/g, "&quot;")}"
         title="${tooltipText.replace(/"/g, "&quot;")}"
-        style="cursor:pointer">${status} <i class="bi bi-exclamation-triangle"></i> </span>`;
+        style="cursor:pointer"> <i class="bi bi-exclamation-triangle me-1"></i>${status} </span>`;
 }
 
 // Init Bootstrap tooltips + popovers on all missing badges in the DOM.
@@ -925,8 +962,8 @@ function initMissingBadgeInteractivity() {
 
 function renderMissingCell(row) {
     const seriesTitle = getSeriesTitle(row);
-    const safeSeries = seriesTitle.replace(/"/g, "&quot;");
-    const safeEpisodes = getEpisodesString(row).replace(/"/g, "&quot;");
+    const safeSeries = seriesTitle.replace(/"/g, '"');
+    const safeEpisodes = getEpisodesString(row).replace(/"/g, '"');
     const cachedEntry = missingValuesMap[seriesTitle];
 
     const content = cachedEntry
@@ -934,6 +971,43 @@ function renderMissingCell(row) {
         : `<span class="missing-loading text-muted small">Loading...</span>`;
 
     return `<td class="missing-cell" data-series="${safeSeries}" data-episodes="${safeEpisodes}">${content}</td>`;
+}
+
+function renderStatusDiffCell(row) {
+    const seriesTitle = getSeriesTitle(row);
+    const cached = tvmazeCache[seriesTitle];
+    const tvData = (cached && cached.data) ? cached.data : null;
+
+    if (!tvData) {
+        return `<td class="status-diff-cell" data-series="${seriesTitle.replace(/"/g, '"')}">
+            <span class="badge rounded-pill text-bg-info">n/a</span>
+        </td>`;
+    }
+
+    const excelStatus = getRowStatus(row);
+    const tvStatus = tvData.tvStatus || "";
+
+    let result = { label: "Complete", cls: "text-bg-success" };
+
+    if (excelStatus === "finished") {
+        if (tvStatus === "Ended") {
+            result = { label: "Complete", cls: "text-bg-success" };
+        } else {
+            result = { label: "Attention", cls: "text-bg-danger" };
+        }
+    } else if (excelStatus === "ongoing") {
+        if (tvStatus === "Ended") {
+            result = { label: "Attention", cls: "text-bg-danger" };
+        } else {
+            result = { label: "Complete", cls: "text-bg-success" };
+        }
+    } else if (excelStatus === "") {
+        result = { label: "n/a", cls: "text-bg-info" };
+    }
+
+    return `<td class="status-diff-cell" data-series="${seriesTitle.replace(/"/g, '"')}">
+        <span class="badge rounded-pill ${result.cls}">${result.label}</span>
+    </td>`;
 }
 
 function renderTable() {
@@ -944,43 +1018,7 @@ function renderTable() {
     const end = start + CONFIG.rowsPerPage;
 
     const pageData = CONFIG.filteredData.slice(start, end);
-    const statusFilter = document.getElementById("statusFilter")?.value || "";
-    const columnsToRender = [...CONFIG.columns];
-
-    // Status-Tv goes right after Status
-    if (!columnsToRender.includes("Status-Tv")) {
-        const statusIdx = columnsToRender.indexOf("Status");
-        columnsToRender.splice(statusIdx >= 0 ? statusIdx + 1 : columnsToRender.length, 0, "Status-Tv");
-    }
-
-    // Show Type goes right after Type, then Genres, then Rating
-    if (!columnsToRender.includes("Show Type")) {
-        const typeIdx = columnsToRender.indexOf("Type");
-        columnsToRender.splice(typeIdx >= 0 ? typeIdx + 1 : columnsToRender.length, 0, "Show Type");
-    }
-    if (!columnsToRender.includes("Genres")) {
-        const showTypeIdx = columnsToRender.indexOf("Show Type");
-        columnsToRender.splice(showTypeIdx >= 0 ? showTypeIdx + 1 : columnsToRender.length, 0, "Genres");
-    }
-    if (!columnsToRender.includes("Rating")) {
-        const genresIdx = columnsToRender.indexOf("Genres");
-        columnsToRender.splice(genresIdx >= 0 ? genresIdx + 1 : columnsToRender.length, 0, "Rating");
-    }
-
-    // Missing always goes right after Rating
-    if (!columnsToRender.includes("Missing")) {
-        const ratingIdx = columnsToRender.indexOf("Rating");
-        columnsToRender.splice(ratingIdx >= 0 ? ratingIdx + 1 : columnsToRender.length, 0, "Missing");
-    }
-
-    if (statusFilter === "Download") {
-        const typeIndex = columnsToRender.indexOf("Type");
-        if (typeIndex >= 0 && !columnsToRender.includes("Download")) {
-            columnsToRender.splice(typeIndex + 1, 0, "Download");
-        } else if (!columnsToRender.includes("Download")) {
-            columnsToRender.push("Download");
-        }
-    }
+    const columnsToRender = getColumnsToRender();
 
     tbody.innerHTML = pageData
         .map((row, rowIndex) => `
@@ -993,7 +1031,14 @@ function renderTable() {
                     if (col === "Missing") {
                         return renderMissingCell(row);
                     }
-                    if (col === "Status-Tv" || col === "Show Type" || col === "Genres" || col === "Rating") {
+                    if (col === "Status Diff") {
+                        return renderStatusDiffCell(row);
+                    }
+                    if (col === "Read more") {
+                        const absoluteIndex = CONFIG.data.indexOf(row);
+                        return `<td><a href="details.html?id=${absoluteIndex}" class="btn btn-sm btn-success">Read more</a></td>`;
+                    }
+                    if (col === "Status Tv" || col === "Show Type" || col === "Genres" || col === "Rating") {
                         return renderTVMazeCell(row, col);
                     }
                     return `<td>${row[col] || ""}</td>`;
@@ -1162,10 +1207,9 @@ async function resolveMissingForRow(row) {
     }
 }
 
-// Process a list of rows with a small worker pool instead of one-by-one with a
-// fixed 150ms delay. This is the main speed-up for large sheets (~800 rows):
-// several TVMaze lookups happen in parallel instead of strictly sequentially.
-async function processRowsWithConcurrency(rows, concurrency = 5) {
+// Process a list of rows with a worker pool.
+// Several TVMaze lookups are queued; the rate limiter ensures we stay within API limits.
+async function processRowsWithConcurrency(rows, concurrency = 10) {
     let cursor = 0;
 
     async function worker() {
@@ -1210,7 +1254,7 @@ async function loadMissingEpisodesForVisibleCells() {
             return title ? !missingValuesMap[title] : missingValuesMap[""] !== "N/A";
         });
 
-        await processRowsWithConcurrency(remainingRows, 5);
+        await processRowsWithConcurrency(remainingRows, 10);
     } finally {
         missingBackgroundLoaderRunning = false;
     }
@@ -1298,9 +1342,19 @@ function changePage(page) {
 // =====================
 // CLEAR FILTERS
 // =====================
+function clearCache() {
+    const customSiteUrl = localStorage.getItem("customSiteUrl");
+    localStorage.clear();
+    if (customSiteUrl) {
+        localStorage.setItem("customSiteUrl", customSiteUrl);
+    }
+    location.reload();
+}
+
 function clearFilters() {
     const statusEl = document.getElementById("statusFilter");
     const typeEl = document.getElementById("typeFilter");
+    const typeDiffEl = document.getElementById("typeDiffFilter");
     const siteEl = document.getElementById("siteFilter");
     const missingEl = document.getElementById("missingFilter");
     const searchEl = document.getElementById("searchInput");
@@ -1312,6 +1366,7 @@ function clearFilters() {
 
     if (statusEl) statusEl.value = "";
     if (typeEl) typeEl.value = "";
+    if (typeDiffEl) typeDiffEl.value = "";
     if (siteEl) {
         siteEl.value = "";
         CONFIG.site = "";
@@ -1336,10 +1391,7 @@ function clearFilters() {
     if (rowsSelect) rowsSelect.value = String(CONFIG.rowsPerPage || 10);
 
     // reapply filters and update UI
-    applyAll();
-    renderTableHead();
-    renderTable();
-    renderPagination();
+    refreshUI();
 
     // update URL to minimal state (page + rpp)
     const params = new URLSearchParams();
@@ -1427,9 +1479,7 @@ async function init({ rowsPerPage = 10 } = {}) {
             CONFIG.rowsPerPage = v;
             CONFIG.currentPage = 1;
             updateURL();
-            applyAll();
-            renderTable();
-            renderPagination();
+            refreshUI();
         });
     }
 
@@ -1440,10 +1490,7 @@ async function init({ rowsPerPage = 10 } = {}) {
             searchTimeout = setTimeout(() => {
                 CONFIG.search = e.target.value.toLowerCase();
                 CONFIG.currentPage = 1;
-
-                applyAll();
-                renderTable();
-                renderPagination();
+                refreshUI();
             }, 250);
         });
     }
@@ -1451,19 +1498,22 @@ async function init({ rowsPerPage = 10 } = {}) {
     const statusFilter = document.getElementById("statusFilter");
     if (statusFilter) statusFilter.addEventListener("change", () => {
         CONFIG.currentPage = 1;
-        applyAll();
         updateURL();
-        renderTable();
-        renderPagination();
+        refreshUI();
     });
 
     const typeFilter = document.getElementById("typeFilter");
     if (typeFilter) typeFilter.addEventListener("change", () => {
         CONFIG.currentPage = 1;
-        applyAll();
         updateURL();
-        renderTable();
-        renderPagination();
+        refreshUI();
+    });
+
+    const typeDiffFilter = document.getElementById("typeDiffFilter");
+    if (typeDiffFilter) typeDiffFilter.addEventListener("change", () => {
+        CONFIG.currentPage = 1;
+        updateURL();
+        refreshUI();
     });
 
     const siteFilter = document.getElementById("siteFilter");
@@ -1471,9 +1521,7 @@ async function init({ rowsPerPage = 10 } = {}) {
         CONFIG.site = siteFilter.value;
         CONFIG.currentPage = 1;
         updateURL();
-        applyAll();
-        renderTable();
-        renderPagination();
+        refreshUI();
     });
 
     const customSiteInput =
@@ -1503,9 +1551,7 @@ async function init({ rowsPerPage = 10 } = {}) {
         CONFIG.missing = missingFilter.value;
         CONFIG.currentPage = 1;
         updateURL();
-        applyAll();
-        renderTable();
-        renderPagination();
+        refreshUI();
     });
 
     // TVMaze info filters
@@ -1513,9 +1559,7 @@ async function init({ rowsPerPage = 10 } = {}) {
         const el = document.getElementById(id);
         if (el) el.addEventListener("change", () => {
             CONFIG.currentPage = 1;
-            applyAll();
-            renderTable();
-            renderPagination();
+            refreshUI();
         });
     });
 
@@ -1526,12 +1570,17 @@ async function init({ rowsPerPage = 10 } = {}) {
         });
     }
 
-    // initial render
-    applyAll();
+    const clearCacheBtn = document.getElementById("clearCacheBtn");
+    if (clearCacheBtn) {
+        clearCacheBtn.addEventListener("click", () => {
+            if (confirm("Are you sure you want to clear all cached data? This will remove saved Excel data and TVMaze info.")) {
+                clearCache();
+            }
+        });
+    }
 
-    renderTableHead();
-    renderTable();
-    renderPagination();
+    // initial render
+    refreshUI();
 
     loadMissingEpisodesForVisibleCells();
     updateMissingProgressBar();
@@ -1541,6 +1590,7 @@ async function init({ rowsPerPage = 10 } = {}) {
 window.CONFIG = CONFIG;
 window.init = init;
 window.clearFilters = clearFilters;
+window.clearCache = clearCache;
 window.toggleSort = toggleSort;
 window.changePage = changePage;
 window.renderPagination = renderPagination;
