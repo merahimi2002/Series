@@ -935,6 +935,8 @@ function missingBadgeHTML(entry, row) {
 
 // Init Bootstrap tooltips + popovers on all missing badges in the DOM.
 // Called after every table render.
+let missingBadgeListenerRegistered = false;
+
 function initMissingBadgeInteractivity() {
     // Destroy existing instances first to avoid duplicates
     document.querySelectorAll(".missing-detail-badge").forEach(el => {
@@ -946,18 +948,22 @@ function initMissingBadgeInteractivity() {
         if (tt) tt.dispose();
         new bootstrap.Tooltip(el);
     });
-    // Close any open popover when clicking outside
     document.querySelectorAll(".missing-detail-badge").forEach(el => {
         new bootstrap.Popover(el);
     });
-    document.addEventListener("click", e => {
-        if (!e.target.closest(".missing-detail-badge") && !e.target.closest(".popover")) {
-            document.querySelectorAll(".missing-detail-badge").forEach(el => {
-                const pop = bootstrap.Popover.getInstance(el);
-                if (pop) pop.hide();
-            });
-        }
-    }, { capture: true, once: false });
+
+    // Register click-outside listener only once — prevents memory leak
+    if (!missingBadgeListenerRegistered) {
+        document.addEventListener("click", e => {
+            if (!e.target.closest(".missing-detail-badge") && !e.target.closest(".popover")) {
+                document.querySelectorAll(".missing-detail-badge").forEach(el => {
+                    const pop = bootstrap.Popover.getInstance(el);
+                    if (pop) pop.hide();
+                });
+            }
+        }, true);
+        missingBadgeListenerRegistered = true;
+    }
 }
 
 function renderMissingCell(row) {
@@ -1579,10 +1585,9 @@ async function init({ rowsPerPage = 10 } = {}) {
         });
     }
 
-    // initial render
+    // initial render — renderTable() inside refreshUI() already calls
+    // loadMissingEpisodesForVisibleCells(), so we don't call it again here.
     refreshUI();
-
-    loadMissingEpisodesForVisibleCells();
     updateMissingProgressBar();
 }
 
