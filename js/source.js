@@ -1,5 +1,3 @@
-new WOW().init();
-
 
 document.addEventListener("DOMContentLoaded", function () {
     const button = document.querySelector('.first-button');

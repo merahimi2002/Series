@@ -12,59 +12,91 @@
     <link rel="shortcut icon" href="Image/favicon.ico" type="image/x-icon">
     <title>Series Details</title>
     <style>
-        
+
     </style>
 </head>
 
-<body class="bg-light">
+<body>
     <div class="Navbar-class">
         <div class="container py-md-4 py-3">
             <div class="row">
                 <div class="col-md-8 col-3">
                     <nav class="navbar navbar-expand-lg">
+                        <button class="navbar-toggler first-button" type="button" data-bs-toggle="collapse"
+                            data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent"
+                            aria-expanded="false" aria-label="">
+                            <div class="animated-icon1"><span></span><span></span><span></span></div>
+                        </button>
                         <div class="collapse navbar-collapse" id="navbarSupportedContent">
                             <ul class="navbar-nav">
                                 <li class="nav-item active">
-                                    <a class="nav-link" href="index.html">Home</a>
+                                    <a class="nav-link" href="/">Home</a>
                                 </li>
                             </ul>
                         </div>
                     </nav>
                 </div>
-                <div class="col-md-3 col-6"></div>
+                <div class="col-md-3 col-6">
+                    <div class="SideNav">
+                        <div class="ChangeThemeBox">
+                            <div class="CustomColorPicker">
+                                <input type="color" id="firstColorInput">
+                                <input type="color" id="secondColorInput">
+                            </div>
+                            <button class="ChangeColorBtn" onclick="changeColor()">
+                                <span class="color01">.</span>
+                                <span class="color02">.</span>
+                            </button>
+                            <button class="ChangeColorBtn ChangeColorBtn01" onclick="changeColor01()">
+                                <span class="color01">.</span>
+                                <span class="color02">.</span>
+                            </button>
+                            <div id="ThemeBoxSwitch">
+                                <input type="checkbox" class="checkbox" id="ThemeBoxSwitchInput">
+                                <label class="label" for="ThemeBoxSwitchInput">
+                                    <i class="bi bi-moon"></i>
+                                    <i class="bi bi-sun"></i>
+                                    <div class="ball"></div>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 <div class="col-md-1 col-3">
                     <div class="logo-header">
-                        <a href="index.html"><img class="w-50" src="Image/logo.png" alt="pic"></a>
+                        <a href="/"><img class="w-50" src="Image/logo.png" alt="pic"></a>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <div id="mainContent">
+    <div id="mainContent" class="Details">
         <!-- Hero Section -->
-        <section class="series-hero mb-5">
+        <section class="Details-box mb-5">
             <div class="container">
                 <div class="row align-items-center">
-                    <div class="col-md-4 text-center mb-4 mb-md-0">
-                        <img id="seriesPoster" src="" alt="Poster" class="poster-img rounded-3">
+                    <div class="col-md-2 px-md-0 px-3">
+                        <img id="seriesPoster" src="" alt="Poster">
                     </div>
-                    <div class="col-md-8 text-center text-md-start">
-                        <h1 id="seriesTitle" class="display-4 fw-bold mb-3">Loading...</h1>
-                        <div id="heroBadges" class="d-flex flex-wrap justify-content-center justify-content-md-start gap-2 mb-4">
+                    <div class="col-md-1"></div>
+                    <div class="col-md-8">
+                        <h1 id="seriesTitle" class="mb-5">Loading...</h1>
+                        <div id="heroBadges"
+                            class="d-flex flex-wrap justify-content-center justify-content-md-start gap-2 mb-4">
                             <!-- Badges like Type, Language, Status will go here -->
                         </div>
-                        <div class="d-flex flex-wrap justify-content-center justify-content-md-start gap-3">
+                        <div class="d-flex flex-wrap justify-content-center justify-content-md-start gap-5">
                             <div class="text-center">
-                                <span class="info-label d-block">Rating</span>
+                                <span class="Details-box-head">Rating</span>
                                 <span id="seriesRating" class="fs-4 fw-bold text-warning">N/A</span>
                             </div>
                             <div class="text-center">
-                                <span class="info-label d-block">Premiered</span>
+                                <span class="Details-box-head">Premiered</span>
                                 <span id="seriesPremiered" class="fs-5 fw-bold">N/A</span>
                             </div>
                             <div class="text-center">
-                                <span class="info-label d-block">Runtime</span>
+                                <span class="Details-box-head">Runtime</span>
                                 <span id="seriesRuntime" class="fs-5 fw-bold">N/A</span>
                             </div>
                         </div>
@@ -73,7 +105,7 @@
             </div>
         </section>
 
-        <section class="pb-5">
+        <section class="Details-content">
             <div class="container">
                 <div class="row g-4">
                     <!-- Left Column: Summary and Main Info -->
@@ -84,31 +116,6 @@
                                 Loading summary...
                             </div>
                         </div>
-
-                        <div class="card detail-card shadow-sm p-4">
-                            <h4 class="fw-bold mb-4"><i class="bi bi-info-circle me-2 text-primary"></i>General Information</h4>
-                            <div id="generalInfo" class="row g-3">
-                                <!-- General info fields will be injected here -->
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Right Column: Technical and Links -->
-                    <div class="col-lg-4">
-                        <div class="card detail-card shadow-sm p-4 mb-4">
-                            <h4 class="fw-bold mb-4"><i class="bi bi-gear me-2 text-primary"></i>Technical Details</h4>
-                            <div id="technicalInfo" class="row g-3">
-                                <!-- Technical info fields will be injected here -->
-                            </div>
-                        </div>
-
-                        <div class="card detail-card shadow-sm p-4 mb-4">
-                            <h4 class="fw-bold mb-4"><i class="bi bi-link-45deg me-2 text-primary"></i>External Links</h4>
-                            <div id="externalLinks" class="d-grid gap-2">
-                                <!-- Links will be injected here -->
-                            </div>
-                        </div>
-
                         <div class="card detail-card shadow-sm p-4">
                             <h4 class="fw-bold mb-4"><i class="bi bi-database me-2 text-primary"></i>Database Info</h4>
                             <div id="databaseInfo" class="row g-2">
@@ -116,17 +123,106 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- Right Column: Technical and Links -->
+                    <div class="col-lg-4">
+                        <div class="card detail-card shadow-sm p-4 mb-4">
+                            <h4 class="fw-bold mb-4"><i class="bi bi-info-circle me-2 text-primary"></i>General
+                                Information</h4>
+                            <div id="generalInfo" class="row g-3">
+                                <!-- General info fields will be injected here -->
+                            </div>
+                        </div>
+
+                        <div class="card detail-card shadow-sm p-4 mb-4">
+                            <h4 class="fw-bold mb-4"><i class="bi bi-link-45deg me-2 text-primary"></i>External Links
+                            </h4>
+                            <div id="externalLinks">
+                                <!-- Links will be injected here -->
+                            </div>
+                        </div>
+
+                        <div class="card detail-card shadow-sm p-4">
+                            <h4 class="fw-bold mb-4"><i class="bi bi-gear me-2 text-primary"></i>Technical Details</h4>
+                            <div id="technicalInfo" class="row g-3">
+                                <!-- Technical info fields will be injected here -->
+                            </div>
+                        </div>
+
+                    </div>
                 </div>
-                
+
                 <div class="text-center mt-5">
-                    <a href="index.html" class="btn btn-outline-primary btn-lg px-5 rounded-pill">Back to Home</a>
+                    <a href="index.html" class="read-more">Back to Home</a>
                 </div>
             </div>
         </section>
     </div>
 
+    <footer>
+        <div class="container">
+            <div class="row">
+                <div class="col-md-4 col-12 wow fadeInUp" data-wow-delay=".3s">
+                    <div class="footer-box footer-address">
+                        <div class="logo-footer">
+                            <a href="/"><img class="w-50" src="Image/logo.png" alt="pic"></a>
+                        </div>
+                        <p>Lorem Ipsum is a <span>fake text</span> produced by the printing industry with the help of
+                            graphic designers.
+                        </p>
+                        <ul class="sm-list">
+                            <li><a href="#" target="_blank"><i class="bi bi-instagram"></i></a></li>
+                            <li><a href="#" target="_blank"><i class="bi bi-telegram"></i></a></li>
+                            <li><a href="#" target="_blank"><i class="bi bi-whatsapp"></i></a></li>
+                            <li><a href="#" target="_blank"><i class="bi bi-twitter"></i></a></li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="col-md-1 col-12"></div>
+                <div class="col-md-3 col-12 wow fadeInUp" data-wow-delay=".5s">
+                    <div class="footer-box footer-links">
+                        <h5><span>Quick </span>access</h5>
+                        <ul>
+                            <li><i class="bi bi-chevron-double-right"></i><a href="/">Home</a></li>
+                            <li><i class="bi bi-chevron-double-right"></i><a href="#">About us</a></li>
+                            <li><i class="bi bi-chevron-double-right"></i><a href="#">Contact us</a></li>
+                            <li><i class="bi bi-chevron-double-right"></i><a href="#">Products</a></li>
+                        </ul>
+                    </div>
+
+
+                </div>
+                <div class="col-md-4 col-12 wow fadeInUp" data-wow-delay=".7s">
+                    <div class="footer-box footer-contact">
+                        <h5><span>Communicative </span>ways</h5>
+                        <ul>
+                            <li><i class="bi bi-geo-alt"></i><a href="#">address</a></li>
+                            <li><i class="bi bi-phone"></i><a href="tel:+982177123456">021-77123456</a></li>
+                            <li><i class="bi bi-telephone"></i><a href="tel:+982177123456">021-77123456</a></li>
+                            <li><i class="bi bi-envelope-at"></i><a
+                                    href="mailto:example@support.com">example@support.com</a></li>
+                        </ul>
+
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-12 text-center">
+                    <div class="copyright">
+                        <p>Copyright © 2026 for Series. Designed by <a href="http://nextlancer.ir/" title="nextlancer"
+                                target="_blank">Next Lancer</a>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+
     <script src="js/bootstrap.min.js"></script>
     <script src="js/db.js"></script>
     <script src="js/details.js"></script>
+    <script src="js/source.js"></script>
 </body>
+
 </html>

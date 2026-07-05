@@ -5,6 +5,8 @@
     --black-custome: 0, 0, 0;
     --radius-custome: 20px;
     --medium-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.2);
+    --bs-primary-rgb: var(--first-color);
+    --bs-secondary-rgb: var(--second-color);
 }
 
 body {
@@ -539,6 +541,62 @@ nav.navbar {
     border-radius: 0 15px 15px 0 !important;
 }
 
+.read-more {
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(90deg, rgb(var(--second-color)), rgb(var(--first-color)));
+    color: white !important;
+    padding: 10px 20px;
+    border-radius: var(--radius-custome);
+    transition: color 0.4s ease;
+    z-index: 1;
+}
+
+.read-more::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(-90deg, rgb(var(--second-color)), rgb(var(--first-color)));
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    z-index: -1;
+}
+
+.read-more:hover::after {
+    opacity: 1;
+}
+
+.read-more-two {
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(-90deg, rgb(var(--second-color)), rgb(var(--first-color)));
+    color: white !important;
+    padding: 10px 20px;
+    border-radius: var(--radius-custome);
+    transition: color 0.4s ease;
+    z-index: 1;
+}
+
+.read-more-two::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(90deg, rgb(var(--second-color)), rgb(var(--first-color)));
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    z-index: -1;
+}
+
+.read-more-two:hover::after {
+    opacity: 1;
+}
+
 /* Slider */
 
 .Slider {
@@ -655,6 +713,7 @@ footer {
     margin-top: 50px;
     padding-top: 20px;
     overflow: hidden;
+    border-radius: var(--radius-custome) var(--radius-custome) 0 0;
 }
 
 footer h5 {
@@ -752,50 +811,82 @@ footer .sm-list li:hover .bi {
 /* End Footer */
 
 
-.series-hero {
-    background: linear-gradient(to bottom, rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.9)), #1a1a1a;
+.Details-box {
+    background: linear-gradient(0deg, rgb(var(--first-color)), rgb(var(--second-color)));
     color: white;
     border-radius: 0 0 2rem 2rem;
-    padding: 4rem 0;
+    padding: 10rem 0 4rem;
+    margin-top: 0;
 }
 
-.poster-img {
-    box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.5);
-    border: 4px solid white;
-    max-width: 300px;
+.Details-box img {
     width: 100%;
+    border-radius: var(--radius-custome);
+    box-shadow: var(--medium-shadow);
 }
 
-.info-label {
-    color: #6c757d;
-    font-weight: 600;
-    font-size: 0.9rem;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+.Details-box-head {
+    display: block;
+    margin: 20px 0;
 }
 
-.info-value {
-    font-weight: 500;
-    color: #212529;
-}
-
-.detail-card {
+.Details-content .detail-card {
     border: none;
-    border-radius: 1rem;
-    transition: transform 0.2s;
+    border-radius: var(--radius-custome);
+    background-color: rgb(var(--white-custome));
+    color: rgba(var(--black-custome), 0.8);
+    transition: transform 0.4s;
 }
 
-.detail-card:hover {
+.Details-content .detail-card:hover {
     transform: translateY(-5px);
 }
 
-.summary-box {
-    background: #f8f9fa;
-    border-left: 5px solid #0d6efd;
+.Details-content .summary-box {
+    border-left: 5px solid rgb(var(--first-color));
     padding: 1.5rem;
     border-radius: 0.5rem;
 }
 
+.Details-content .info-label {
+    font-weight: 600;
+}
+
+.Details-content .info-value {
+    display: flex;
+    width: fit-content;
+    color: rgb(var(--first-color));
+    background-color: rgb(var(--first-color), 0.03);
+    border-radius: var(--radius-custome);
+    padding: 1px 10px;
+    margin: 10px 0;
+    transition: 0.4s;
+}
+
+.Details-content #technicalInfo .info-value {
+    color: rgb(var(--second-color));
+    background-color: transparent;
+    border: 1px dashed;
+}
+
+.Details-content #technicalInfo .info-value:hover {
+    background-color: rgb(var(--second-color));
+    border-color: rgb(var(--second-color));
+    color: white;
+}
+
+.Details-content #externalLinks {
+   display: flex;
+   flex-wrap: wrap;
+   gap: 10px;
+}
+
+@media (max-width: 768px) {
+    #seriesTitle {
+        text-align: center;
+        margin-top: 20px;
+    }
+}
 
 /* Responsive */
 

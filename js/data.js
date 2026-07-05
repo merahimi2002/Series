@@ -391,7 +391,7 @@ function calculateStatusDiff(row, tvData) {
         return { label: "Complete", cls: "text-bg-success" };
     }
 
-    if (!tvData) return { label: "n/a", cls: "text-bg-info" };
+    if (!tvData) return { label: "N/A", cls: "text-bg-info" };
 
     const tvStatus = tvData.show?.status || "";
 
@@ -404,12 +404,12 @@ function calculateStatusDiff(row, tvData) {
         // getRowStatus() lowercases to "on going" — not "ongoing". The old
         // comparison here used "ongoing" (no space) and never matched, so
         // every "On Going" row (and therefore any TVMaze status under it,
-        // including "To Be Determined") fell through to the n/a branch below.
+        // including "To Be Determined") fell through to the N/A branch below.
         return tvStatus === "Ended"
             ? { label: "Attention", cls: "text-bg-danger" }
             : { label: "Complete", cls: "text-bg-success" };
     } else {
-        return { label: "n/a", cls: "text-bg-info" };
+        return { label: "N/A", cls: "text-bg-info" };
     }
 }
 
@@ -592,13 +592,22 @@ async function parseWorkbookBuffer(arrayBuffer) {
 
 async function loadExcelOnce() {
     if (Array.isArray(excelCache) && excelCache.length > 0) {
-        excelCache = normalizeCachedData(excelCache);
+        const normalized = normalizeCachedData(excelCache);
+        // Persist the normalized version back to IndexedDB so anything reading
+        // the raw cache directly (e.g. details.js) sees the same headers/keys
+        // as CONFIG.data. Previously this normalization only happened in memory,
+        // so the stored cache could drift from what the app actually used.
+        if (normalized !== excelCache) {
+            await db.setItem("excelCache", normalized);
+        }
+        excelCache = normalized;
         return excelCache;
     }
 
-    const cached = normalizeCachedData(getExcelFromStorage());
+    const cached = normalizeCachedData(await getExcelFromStorage());
     if (cached.length > 0) {
         excelCache = cached;
+        await db.setItem("excelCache", cached);
         return excelCache;
     }
 
@@ -703,10 +712,20 @@ function syncFromURL() {
     const typeEl = document.getElementById("typeFilter");
     const siteEl = document.getElementById("siteFilter");
     const missingEl = document.getElementById("missingFilter");
+    const typeDiffEl = document.getElementById("typeDiffFilter");
+    const tvStatusEl = document.getElementById("tvStatusFilter");
+    const showTypeEl = document.getElementById("showTypeFilter");
+    const genresEl = document.getElementById("genresFilter");
+    const ratingEl = document.getElementById("ratingFilter");
     if (statusEl) statusEl.value = params.get("status") || "";
     if (typeEl) typeEl.value = params.get("type") || "";
     if (siteEl) siteEl.value = CONFIG.site;
     if (missingEl) missingEl.value = CONFIG.missing;
+    if (typeDiffEl) typeDiffEl.value = params.get("diff") || "";
+    if (tvStatusEl) tvStatusEl.value = params.get("tvStatus") || "";
+    if (showTypeEl) showTypeEl.value = params.get("showType") || "";
+    if (genresEl) genresEl.value = params.get("genres") || "";
+    if (ratingEl) ratingEl.value = params.get("rating") || "";
 }
 
 function updateURL() {
@@ -718,12 +737,22 @@ function updateURL() {
     const type = document.getElementById("typeFilter")?.value;
     const site = document.getElementById("siteFilter")?.value;
     const missing = document.getElementById("missingFilter")?.value;
+    const typeDiff = document.getElementById("typeDiffFilter")?.value;
+    const tvStatus = document.getElementById("tvStatusFilter")?.value;
+    const showType = document.getElementById("showTypeFilter")?.value;
+    const genres = document.getElementById("genresFilter")?.value;
+    const rating = document.getElementById("ratingFilter")?.value;
     const rpp = CONFIG.rowsPerPage;
 
     if (status) params.set("status", status);
     if (type) params.set("type", type);
     if (site) params.set("site", site);
     if (missing) params.set("missing", missing);
+    if (typeDiff) params.set("diff", typeDiff);
+    if (tvStatus) params.set("tvStatus", tvStatus);
+    if (showType) params.set("showType", showType);
+    if (genres) params.set("genres", genres);
+    if (rating) params.set("rating", rating);
     if (rpp) params.set("rpp", String(rpp));
 
     window.history.replaceState({}, "", `?${params.toString()}`);
@@ -1005,7 +1034,7 @@ function renderStatusDiffCell(row) {
     // so the badge shown here always matches what the filter matches against.
     // Previously this had its own duplicated logic that disagreed with
     // calculateStatusDiff for any status other than "finished"/"ongoing"/"",
-    // e.g. rows with status "download" showed "Complete" but were filtered as "n/a".
+    // e.g. rows with status "download" showed "Complete" but were filtered as "N/A".
     const result = calculateStatusDiff(row, tvData);
 
     return `<td class="status-diff-cell" data-series="${seriesTitle.replace(/"/g, '"')}">

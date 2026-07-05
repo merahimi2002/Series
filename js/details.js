@@ -1,4 +1,19 @@
 document.addEventListener("DOMContentLoaded", async function () {
+    // Case-insensitive lookup, mirroring getRowValue()/getSeriesTitle() in data.js.
+    // Excel headers can be "Title", "title", "Serial Name", "Name", etc. — an exact,
+    // case-sensitive check (item["title"]) misses variants like "Title" and leaves
+    // seriesTitle empty, which is why the title, TVMaze lookup, and all API-derived
+    // sections (Rating/Premiered/Runtime/Summary/General Info) were showing nothing.
+    function getRowValueCI(row, keys) {
+        const lowerKeys = keys.map(k => k.toLowerCase());
+        for (const key of Object.keys(row)) {
+            if (lowerKeys.includes(key.toLowerCase()) && row[key] != null && String(row[key]).trim() !== "") {
+                return String(row[key]).trim();
+            }
+        }
+        return "";
+    }
+
     const params = new URLSearchParams(window.location.search);
     const idStr = params.get("id");
     const id = parseInt(idStr, 10);
@@ -25,7 +40,7 @@ document.addEventListener("DOMContentLoaded", async function () {
         return;
     }
 
-    const seriesTitle = item["Serial Name"] || item["title"] || item["Name"] || "";
+    const seriesTitle = getRowValueCI(item, ["Serial Name", "serial name", "Serial name", "title", "Title", "Name", "name"]);
     document.getElementById("seriesTitle").textContent = seriesTitle || "Unknown Series";
 
     const tvmazeCache = await db.getItem("tvmazeCache") || {};
@@ -36,7 +51,7 @@ document.addEventListener("DOMContentLoaded", async function () {
 
     const createInfoRow = (label, value) => {
         return `
-            <div class="col-6 col-sm-4">
+            <div class="col-6 col-xxl-4">
                 <span class="info-label d-block">${label}</span>
                 <span class="info-value">${value}</span>
             </div>
@@ -64,7 +79,7 @@ document.addEventListener("DOMContentLoaded", async function () {
         heroBadges.innerHTML = `
             <span class="badge bg-primary">${safe(apiData.type)}</span>
             <span class="badge bg-secondary">${safe(apiData.language)}</span>
-            <span class="badge bg-info text-dark">${safe(apiData.status)}</span>
+            <span class="badge bg-success">${safe(apiData.status)}</span>
         `;
 
         const ratingVal = apiData.rating?.average;
@@ -105,15 +120,20 @@ document.addEventListener("DOMContentLoaded", async function () {
         // 5. External Links
         const linksDiv = document.getElementById("externalLinks");
         linksDiv.innerHTML = "";
+        if (apiData.url) {
+            linksDiv.innerHTML += `<a href="${apiData.url}" target="_blank" class="read-more"><i class="bi bi-tv me-2"></i>Tv Maze</a>`;
+        }
+        if (apiData.externals?.imdb) {
+            linksDiv.innerHTML += `<a href="https://www.imdb.com/title/${apiData.externals.imdb}/" target="_blank" class="read-more-two"><i class="bi bi-camera-video me-2"></i>IMDB</a>`;
+        }
         if (apiData.officialSite) {
-            linksDiv.innerHTML += `<a href="${apiData.officialSite}" target="_blank" class="btn btn-outline-primary text-start"><i class="bi bi-globe me-2"></i> Official Website</a>`;
+            linksDiv.innerHTML += `<a href="${apiData.officialSite}" target="_blank" class="read-more"><i class="bi bi-globe me-2"></i> Official Website</a>`;
         }
         if (apiData._links?.self?.href) {
-            linksDiv.innerHTML += `<a href="${apiData._links.self.href}" target="_blank" class="btn btn-outline-secondary text-start"><i class="bi bi-link-45deg me-2"></i> TVMaze API</a>`;
+            linksDiv.innerHTML += `<a href="${apiData._links.self.href}" target="_blank" class="read-more-two"><i class="bi bi-link-45deg me-2"></i>API</a>`;
         }
-        if (apiData._links?.previousepisode?.href) {
-            linksDiv.innerHTML += `<a href="${apiData._links.previousepisode.href}" target="_blank" class="btn btn-outline-info text-start"><i class="bi bi-arrow-left-circle me-2"></i> Previous Episode</a>`;
-        }
+
+        
     } else {
         document.getElementById("seriesSummary").innerHTML = "No additional API data available for this series.";
     }
@@ -124,8 +144,8 @@ document.addEventListener("DOMContentLoaded", async function () {
     Object.entries(item).forEach(([key, value]) => {
         if (value === null || value === undefined || value === "") return;
         dbHtml += `
-            <div class="col-sm-6">
-                <div class="p-2 border-bottom">
+            <div class="col-6 col-md-3">
+                <div class="p-2">
                     <strong class="info-label d-block small">${key}</strong>
                     <span class="info-value">${value}</span>
                 </div>
