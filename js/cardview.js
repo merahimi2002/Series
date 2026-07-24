@@ -77,17 +77,17 @@ function buildCard(row, absoluteIndex) {
     const localType = getRowValue(row, ["Type", "type"]) || "";
 
     const col = document.createElement("div");
-    col.className = "col-6 col-sm-4 col-md-3 col-lg-2";
+    col.className = "col-12 col-sm-6 col-md-4 col-lg-3 col-xxl-2";
     col.innerHTML = `
         <div class="show-card" data-idx="${absoluteIndex}">
             <a href="details.html?id=${absoluteIndex}" class="poster-fake ${hasImage ? "has-image" : ""}" style="background:linear-gradient(150deg, ${c1}, ${c2});">
                 ${hasImage ? `<img src="${posterUrl}" alt="" loading="lazy" class="poster-img">` : ""}
                 ${localType ? `<div class="type-badge">${localType}</div>` : ""}
                 <div class="status-badge ${statusCls}">${statusLabel}</div>
-                ${rating ? `<div class="rating-badge"><i class="bi bi-star-fill"></i>${rating}</div>` : ""}
                 <span class="poster-initial" style="position:relative;z-index:1;">${initials(title)}</span>
             </a>
             <div class="show-body">
+               ${rating ? `<div class="rating-badge"><i class="bi bi-star-fill"></i>${rating}</div>` : ""}
                 <div class="show-title">${title}</div>
                 ${network ? `<div class="show-network">${network}${apiData.premiered ? " &middot; " + apiData.premiered.slice(0, 4) : ""}</div>` : ""}
                 <div class="ep-count">${localTotal} / ${tvTotal || "?"} episodes</div>
