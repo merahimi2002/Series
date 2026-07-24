@@ -242,8 +242,22 @@
                 </div>
 
 
+                <!-- VIEW -->
+                <div class="col-lg-3 col-md-4 col-6">
+                    <label class="form-label small fw-semibold d-block">View</label>
+                    <div class="btn-group gap-2" role="group" aria-label="View toggle">
+                        <button type="button" id="viewTableBtn" class="btn btn-info active">
+                            <i class="bi bi-table me-1"></i>Table
+                        </button>
+                        <button type="button" id="viewCardBtn" class="btn btn-outline-info">
+                            <i class="bi bi-grid-3x3-gap me-1"></i>Card
+                        </button>
+                    </div>
+                </div>
+
                 <!-- CLEAR -->
                 <div class="col-lg-3 col-md-6 col-12">
+                    <label class="form-label small fw-semibold d-block">َAction</label>
                     <button id="clearFiltersBtn" class="btn btn-outline-danger">
                         <i class="bi bi-x-circle me-1"></i>
                         Clear Filters
@@ -265,6 +279,8 @@
                             <tbody id="tableBody"></tbody>
                         </table>
                     </div>
+                    <!-- CARD VIEW  -->
+                    <div id="cardGrid" class="row g-3 d-none"></div>
                     <!-- PAGINATION -->
                     <nav>
                         <ul class="pagination" id="pagination"></ul>
@@ -344,6 +360,7 @@
     <script src="js/xlsx.full.min.js"></script>
     <script src="js/db.js"></script>
     <script src="js/data.js"></script>
+    <script src="js/cardview.js"></script>
     <script src="js/source.js"></script>
 
 
